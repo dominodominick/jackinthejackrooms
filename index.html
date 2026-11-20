@@ -41,6 +41,7 @@
         .ui-layer.hidden {
             display: none;
         }
+        .version-tag { position: absolute; right: 16px; bottom: 12px; font: 700 12px 'Inter', sans-serif; letter-spacing: 0.15em; color: rgba(250, 204, 21, 0.55); }
         /* ---- Mystic Jack cutscene ---- */
         #cutscene { position: fixed; inset: 0; z-index: 60; background: #000; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 1.1s ease; pointer-events: auto; }
         #cutscene.hidden { display: none; }
@@ -50,6 +51,7 @@
         #finalScreen .btn, #victoryScreen .btn { pointer-events: auto; }
         /* ---- The trench (3D) ---- */
         #trenchCanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 8; display: block; cursor: none; }
+        #trenchFx3d { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 8; pointer-events: none; }
         #trenchHud { position: fixed; inset: 0; z-index: 9; pointer-events: none; font-family: 'Inter', sans-serif; }
         #trenchHud .t-cross { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; }
         #trenchHud .t-cross::before, #trenchHud .t-cross::after { content: ''; position: absolute; background: rgba(255,255,255,0.75); box-shadow: 0 0 3px #000; }
@@ -64,6 +66,10 @@
         #trenchHud .t-click div { text-align: center; color: #f1f5f9; }
         #trenchHud .t-click b { display: block; font-size: 22px; letter-spacing: 0.08em; }
         #trenchHud .t-click span { font-size: 13px; color: #cbd5e1; }
+        #trenchHud .t-fx { position: absolute; inset: 0; width: 100%; height: 100%; }
+        #trenchHud .t-counter { position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%) scale(0.6); font: 900 64px 'Inter', sans-serif; letter-spacing: 0.08em; color: #ecfeff; text-shadow: 0 0 18px #22d3ee, 0 0 40px #0891b2, 3px 3px 0 #083344; opacity: 0; }
+        #trenchHud .t-counter.pop { animation: tCounterPop 1.1s ease-out forwards; }
+        @keyframes tCounterPop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(1.8) rotate(-4deg); } 12% { opacity: 1; transform: translate(-50%, -50%) scale(0.95) rotate(2deg); } 22% { transform: translate(-50%, -50%) scale(1.05); } 70% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -60%) scale(1); } }
         #trenchHud .t-fade { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
         .boss-bar.top { top: 26px; bottom: auto; }
         /* ---- Dev menu ---- */
@@ -385,6 +391,7 @@
             <span class="text-sm opacity-80 mt-2 block">Controls: WASD/Arrows = Move | Mouse = Aim | SHIFT = Sprint | F/Space = Flashlight | E = Ride Minecart</span>
         </p>
         <button class="btn" onclick="startGame()">Enter The Darkness</button>
+        <div class="version-tag" id="versionTag"></div>
     </div>
 
     <!-- Game Over Screen -->
@@ -1597,6 +1604,8 @@
         };
         rawJackImg.src = "https://i.postimg.cc/yYGLfpLz/jackrooms.png";
 
+        const GAME_VERSION = 'V22';
+        { const vt = document.getElementById('versionTag'); if (vt) vt.textContent = GAME_VERSION; }
         let globalTime = 0;
         let carpetPattern, noisePattern;
         let currentTheme = null;
@@ -10074,7 +10083,9 @@
                     <div class="t-cross"></div>
                     <div class="t-hearts" id="tHearts"></div>
                     <div class="t-ability" id="tAbility"></div>
-                    <div class="t-hint" id="tHint">WASD to move · Shift to run · Mouse to look</div>
+                    <div class="t-hint" id="tHint">WASD / Arrows to move · Shift to run · Mouse to look${player.hasNOBlade ? ' · Space: Time Stop' : ''}</div>
+                    <canvas class="t-fx" id="tFx"></canvas>
+                    <div class="t-counter" id="tCounter">COUNTER!</div>
                     <div class="t-hurt" id="tHurt"></div>
                     <div class="t-click" id="tClick"><div><b>Click to look around</b><span>Esc releases the mouse</span></div></div>
                     <div class="t-fade" id="tFade"></div>`;
@@ -10090,7 +10101,7 @@
                 let t = '';
                 if (player.hasStarCannon) t = `Click: Star Cannon ${S.starCd > 0 ? '' : '●'}`;
                 if (player.hasSpeedCore) t = `Q / Right-click: Parry ${S.parryCd > 0 ? Math.ceil(S.parryCd) + 's' : 'READY'}`;
-                if (player.hasNOBlade) t = `Click: Slash · Space: ${S.bladeCd > 0 ? 'Time Stop ' + Math.ceil(S.bladeCd) + 's' : 'Time Stop / Counter READY'}`;
+                if (player.hasNOBlade) t = `${S.mode === 'FIGHT' ? 'Click: Slash · ' : ''}Space: ${S.bladeCd > 0 ? 'Time Stop ' + Math.ceil(S.bladeCd) + 's' : 'Time Stop / Counter READY'}`;
                 const el = document.getElementById('tAbility');
                 if (el.textContent !== t) el.textContent = t;
             }
@@ -10179,13 +10190,15 @@
             // ---------------------------------------------------------------
             function bindInput() {
                 const keys = S.keys = {};
+                const ARROWS = { ArrowUp: 'KeyW', ArrowDown: 'KeyS', ArrowLeft: 'KeyA', ArrowRight: 'KeyD' };
                 const kd = e => {
                     if (!S || S.dead) return;
+                    if (ARROWS[e.code]) { e.preventDefault(); keys[ARROWS[e.code]] = true; return; }
                     keys[e.code] = true;
                     if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) useBlade(); }
                     if (e.code === 'KeyQ' && !e.repeat) tryParry();
                 };
-                const ku = e => { if (S) S.keys[e.code] = false; };
+                const ku = e => { if (!S) return; S.keys[ARROWS[e.code] || e.code] = false; };
                 const mm = e => {
                     if (!S || document.pointerLockElement !== S.canvas) return;
                     S.yaw -= e.movementX * 0.0022; S.pitch -= e.movementY * 0.0022;
@@ -10204,7 +10217,7 @@
                 window.addEventListener('mousemove', mm); S.canvas.addEventListener('mousedown', md); window.addEventListener('mouseup', mu);
                 document.addEventListener('pointerlockchange', plc); S.canvas.addEventListener('contextmenu', ctxm);
                 document.getElementById('tClick').addEventListener('mousedown', md);
-                const rs = () => { if (!S) return; S.renderer.setSize(window.innerWidth, window.innerHeight); S.camera.aspect = window.innerWidth / window.innerHeight; S.camera.updateProjectionMatrix(); };
+                const rs = () => { if (!S) return; S.renderer.setSize(window.innerWidth, window.innerHeight); if (S.fxR) S.fxR.setSize(window.innerWidth, window.innerHeight); S.camera.aspect = window.innerWidth / window.innerHeight; S.camera.updateProjectionMatrix(); };
                 window.addEventListener('resize', rs);
                 S.unbind = () => {
                     window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku);
@@ -10296,25 +10309,191 @@
                 ring(S.pos, '248,113,113', 3, 0.3);
                 sfx('parry');
             }
+            // ---- N.O. Blade ----
+            // Space = TIME STOP: the screen cracks like glass and shatters, the world
+            // turns cold and still (Jack, his shots and even the rain freeze), and you
+            // move in a flow state that leaves rainbow afterimages.
+            // Space with a purple orb close by = COUNTER: a freeze, the glass breaks,
+            // you streak through Jack in a rainbow blur and cut him several times.
             function useBlade() {
-                if (!player.hasNOBlade || S.mode !== 'FIGHT' || S.bladeCd > 0 || S.counter) return;
-                // Counter: a purple orb close to you -> dash through Jack
+                if (!player.hasNOBlade || S.bladeCd > 0 || S.counter || S.dead || S.mode === 'WIN' || S.mode === 'INTRO') return;
                 let best = -1, bd = 1e9;
-                S.orbs.forEach((o, i) => { if (o.owner === 'jack' && o.kind === 'purple') { const d = o.pos.distanceTo(new THREE.Vector3(S.pos.x, 1.2, S.pos.z)); if (d < CFG.counterReach && d < bd) { bd = d; best = i; } } });
+                const pp = new THREE.Vector3(S.pos.x, 1.2, S.pos.z);
+                S.orbs.forEach((o, i) => { if (o.owner === 'jack' && o.kind === 'purple') { const d = o.pos.distanceTo(pp); if (d < CFG.counterReach && d < bd) { bd = d; best = i; } } });
                 S.bladeCd = CFG.bladeCd;
+                const counter = best >= 0 && S.mode === 'FIGHT';
+                startStopFx(counter);
                 setTimeStop(true);
-                if (best >= 0) {
+                playTimeStopSound();
+                if (counter) {
                     removeOrb(best);
-                    S.counter = { t: 0, from: S.pos.clone() };
-                    S.iframes = Math.max(S.iframes, 0.9);
+                    S.counter = { t: 0, from: S.pos.clone(), cuts: 0 };
+                    S.iframes = Math.max(S.iframes, 1.4);
                 } else {
-                    S.stopT = 3.5;                       // time stop + flow: Jack and his shots freeze
+                    S.stopT = TIMESTOP.stopDuration + TIMESTOP.flowDuration + 1.0;
+                    S.flowT = S.stopT;
                 }
-                sfx('slash');
             }
             function setTimeStop(on) {
                 S.timeStopped = on;
-                S.canvas.style.filter = on ? 'grayscale(0.85) contrast(1.15) brightness(1.05) hue-rotate(160deg) saturate(0.6)' : '';
+                S.canvas.style.transition = on ? 'filter 0.12s' : 'filter 0.6s';
+                S.canvas.style.filter = on ? 'grayscale(0.9) contrast(1.25) brightness(1.08) sepia(0.15) hue-rotate(170deg) saturate(1.6)' : '';
+                if (!on) { S.flowT = 0; if (S.stopFx && !S.stopFx.resumed) { S.stopFx.resumed = true; playTimeResumeSound(); S.stopFx.resumeT = 0; } }
+            }
+            // screen-space glass: cracks spread out from the centre, then it shatters
+            function startStopFx(counter) {
+                const fx = document.getElementById('tFx');
+                fx.width = window.innerWidth; fx.height = window.innerHeight;
+                const cx = fx.width / 2, cy = fx.height / 2, R = Math.hypot(cx, cy);
+                const cracks = [];
+                const N = 14;
+                for (let k = 0; k < N; k++) {
+                    let a = (k / N) * Math.PI * 2 + Math.random() * 0.3, x = cx, y = cy;
+                    const pts = [[x, y]];
+                    let len = 0;
+                    while (len < R) { const st = 30 + Math.random() * 60; a += (Math.random() - 0.5) * 0.45; x += Math.cos(a) * st; y += Math.sin(a) * st; len += st; pts.push([x, y]); }
+                    cracks.push(pts);
+                }
+                // shards: wedges between neighbouring cracks
+                const shards = [];
+                for (let k = 0; k < N; k++) {
+                    const A = cracks[k], B = cracks[(k + 1) % N];
+                    for (let r = 0; r < 3; r++) {
+                        const i0 = Math.floor(r / 3 * (A.length - 1)), i1 = Math.floor((r + 1) / 3 * (A.length - 1));
+                        const j0 = Math.floor(r / 3 * (B.length - 1)), j1 = Math.floor((r + 1) / 3 * (B.length - 1));
+                        const poly = [A[i0], A[i1], B[j1], B[j0]];
+                        const mx = poly.reduce((s2, p2) => s2 + p2[0], 0) / 4, my = poly.reduce((s2, p2) => s2 + p2[1], 0) / 4;
+                        const dir = Math.atan2(my - cy, mx - cx);
+                        shards.push({ poly: poly.map(([x, y]) => [x - mx, y - my]), x: mx, y: my, vx: Math.cos(dir) * (300 + Math.random() * 500), vy: Math.sin(dir) * (300 + Math.random() * 500) - 150, rot: 0, vr: (Math.random() - 0.5) * 8 });
+                    }
+                }
+                S.stopFx = { t: 0, cracks, shards, counter, cx, cy, shatterAt: counter ? TIMESTOP.counterShatterAt : TIMESTOP.shatterAt, shattered: false, resumed: false };
+            }
+            function drawStopFx(dt) {
+                const F = S.stopFx; if (!F) return;
+                const fx = document.getElementById('tFx'), x = fx.getContext('2d');
+                F.t += dt;
+                x.clearRect(0, 0, fx.width, fx.height);
+                const W = fx.width, H = fx.height;
+                // shockwave ring (inverts what it passes over)
+                if (F.t < 0.5) {
+                    const k = F.t / 0.5;
+                    x.save(); x.globalCompositeOperation = 'difference';
+                    x.strokeStyle = '#fff'; x.lineWidth = 60 * (1 - k) + 3;
+                    x.beginPath(); x.arc(F.cx, F.cy, 10 + k * Math.hypot(W, H), 0, Math.PI * 2); x.stroke();
+                    x.restore();
+                }
+                if (!F.shattered) {
+                    // cracks spreading
+                    const grow = Math.min(1, F.t / F.shatterAt);
+                    x.save();
+                    x.strokeStyle = 'rgba(240,253,255,0.95)'; x.shadowColor = '#67e8f9'; x.shadowBlur = 10; x.lineWidth = 2;
+                    for (const c of F.cracks) {
+                        const n = Math.max(2, Math.floor(c.length * grow));
+                        x.beginPath(); c.slice(0, n).forEach(([px, py], i) => i ? x.lineTo(px, py) : x.moveTo(px, py)); x.stroke();
+                    }
+                    x.restore();
+                    x.fillStyle = `rgba(165,243,252,${0.12 * grow})`; x.fillRect(0, 0, W, H);
+                    if (F.t >= F.shatterAt) { F.shattered = true; F.st = 0; playGlassShatterSound(); S.shake = Math.max(S.shake, 0.25); }
+                } else {
+                    F.st += dt;
+                    x.save();
+                    for (const sh of F.shards) {
+                        sh.x += sh.vx * dt; sh.y += sh.vy * dt; sh.vy += 900 * dt; sh.rot += sh.vr * dt;
+                        const a = Math.max(0, 1 - F.st / 0.9);
+                        if (a <= 0) continue;
+                        x.save(); x.translate(sh.x, sh.y); x.rotate(sh.rot);
+                        x.beginPath(); sh.poly.forEach(([px, py], i) => i ? x.lineTo(px, py) : x.moveTo(px, py)); x.closePath();
+                        x.fillStyle = `rgba(207,250,254,${0.18 * a})`; x.fill();
+                        x.strokeStyle = `rgba(255,255,255,${0.85 * a})`; x.lineWidth = 1.5; x.stroke();
+                        x.restore();
+                    }
+                    x.restore();
+                    if (F.st < 0.12) { x.fillStyle = `rgba(255,255,255,${0.6 * (1 - F.st / 0.12)})`; x.fillRect(0, 0, W, H); }
+                }
+                // while time is stopped: a cold vignette and a slowly turning clock ring
+                if (S.timeStopped) {
+                    const g = x.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.7);
+                    g.addColorStop(0, 'rgba(8,47,73,0)'); g.addColorStop(1, 'rgba(8,47,73,0.55)');
+                    x.fillStyle = g; x.fillRect(0, 0, W, H);
+                    x.save(); x.translate(W / 2, H / 2); x.rotate(-S.time * 0.4);
+                    x.strokeStyle = 'rgba(165,243,252,0.25)'; x.lineWidth = 2;
+                    const r = Math.min(W, H) * 0.42;
+                    x.beginPath(); x.arc(0, 0, r, 0, Math.PI * 2); x.stroke();
+                    for (let k = 0; k < 12; k++) { x.rotate(Math.PI / 6); x.beginPath(); x.moveTo(r - 14, 0); x.lineTo(r, 0); x.stroke(); }
+                    x.restore();
+                    // tick tock
+                    if (Math.floor(S.time * 2) !== F.tick) { F.tick = Math.floor(S.time * 2); clockTick(F.tick % 2); }
+                }
+                if (F.resumed) {
+                    F.resumeT += dt;
+                    const k = F.resumeT / 0.4;
+                    if (k < 1) { x.save(); x.globalCompositeOperation = 'difference'; x.strokeStyle = '#fff'; x.lineWidth = 40 * (1 - k); x.beginPath(); x.arc(W / 2, H / 2, Math.hypot(W, H) * (1 - k), 0, Math.PI * 2); x.stroke(); x.restore(); }
+                    else { x.clearRect(0, 0, W, H); S.stopFx = null; }
+                }
+            }
+            function clockTick(hi) {
+                const ac = AudioSys.ctx; if (!ac) return;
+                const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+                o.type = 'square'; o.frequency.value = hi ? 2400 : 1800;
+                const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = o.frequency.value; f.Q.value = 8;
+                g.gain.setValueAtTime(0.06, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+                o.connect(f); f.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + 0.05);
+            }
+            // rainbow afterimages of the player model
+            // Afterimages and cuts draw on their own transparent layer above the
+            // (desaturated) world, so they keep their colour while time is stopped.
+            function fxLayer() {
+                if (S.fxR) return S.fxScene;
+                const c = document.createElement('canvas'); c.id = 'trenchFx3d';
+                document.body.appendChild(c);
+                S.fxR = new THREE.WebGLRenderer({ canvas: c, alpha: true, antialias: true });
+                S.fxR.setPixelRatio(S.renderer.getPixelRatio());
+                S.fxR.setSize(window.innerWidth, window.innerHeight);
+                S.fxR.setClearColor(0x000000, 0);
+                S.fxR.outputColorSpace = THREE.SRGBColorSpace;
+                S.fxScene = new THREE.Scene();
+                S.fxCanvas = c;
+                return S.fxScene;
+            }
+            function spawnAfterimage() {
+                if (!S.pm.g.visible && S.mode === 'WALK') return;
+                const hue = (S.ghostHue = ((S.ghostHue || 0) + 47) % 360);
+                const ghost = S.pm.g.clone(true);
+                const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(`hsl(${hue}, 100%, 58%)`), transparent: true, opacity: 0.7, depthWrite: false });
+                ghost.traverse(o => { if (o.isMesh) { o.material = mat; o.castShadow = false; } if (o.isLight) o.intensity = 0; });
+                ghost.visible = true;
+                fxLayer().add(ghost);
+                S.ghosts.push({ g: ghost, mat, life: 0 });
+            }
+            function updateGhosts(dt) {
+                for (let i = S.ghosts.length - 1; i >= 0; i--) {
+                    const g = S.ghosts[i]; g.life += dt;
+                    g.mat.opacity = 0.7 * Math.max(0, 1 - g.life / 0.45);
+                    if (g.life >= 0.45) { S.fxScene.remove(g.g); g.mat.dispose(); S.ghosts.splice(i, 1); }
+                }
+            }
+            function counterText() {
+                const el = document.getElementById('tCounter');
+                el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+            }
+            // slash arcs that hang across Jack, then burst
+            function addCut(angle) {
+                const m = S.slash.clone(); m.material = S.slash.material.clone();
+                m.visible = true; fxLayer().add(m);
+                S.cuts.push({ m, angle, life: 0 });
+            }
+            function updateCuts(dt) {
+                const J = S.jack;
+                for (let i = S.cuts.length - 1; i >= 0; i--) {
+                    const c = S.cuts[i]; c.life += dt;
+                    c.m.position.set(J.x, 1.6 + J.y, J.z);
+                    c.m.quaternion.copy(S.camera.quaternion); c.m.rotateZ(c.angle);
+                    const grow = Math.min(1, c.life / 0.06);
+                    c.m.scale.set(1.2 * grow, 1 + Math.max(0, 0.6 - c.life) * 2, 1);
+                    c.m.material.opacity = Math.max(0, 1 - Math.max(0, c.life - 0.5) / 0.4);
+                    if (c.life > 0.9) { S.fxScene.remove(c.m); c.m.material.dispose(); S.cuts.splice(i, 1); }
+                }
             }
 
             // ---------- Jack's attacks ----------
@@ -10477,6 +10656,7 @@
                     const len = Math.hypot(mx, mz); mx /= len; mz /= len;
                     let sp = (k.ShiftLeft || k.ShiftRight) ? CFG.sprint : CFG.walk;
                     if (player.hasSpeedCore) sp *= CFG.coreSpeed;
+                    if (S.timeStopped) sp *= TIMESTOP.flowSpeedMult * 1.25;
                     const sin = Math.sin(S.yaw), cos = Math.cos(S.yaw);
                     const dx = (mx * cos + mz * sin) * sp * dt, dz = (-mx * sin + mz * cos) * sp * dt;
                     const arenaLock = S.mode === 'FIGHT';
@@ -10490,16 +10670,57 @@
                 // reaching Jack
                 if (S.mode === 'WALK' && (Math.hypot(S.pos.x - J.x, S.pos.z - J.z) < 20 || S.pos.z < ARENA.z1 - 2)) startIntro();
 
-                // --- counter dash ---
+                // --- counter: freeze, dash THROUGH Jack in a rainbow blur, cut him 4 times ---
                 if (S.counter) {
                     const c = S.counter; c.t += dt;
-                    const target = new THREE.Vector3(J.x, 0, J.z), dir = target.clone().sub(c.from).setY(0).normalize();
-                    const end = target.clone().sub(dir.clone().multiplyScalar(1.6));
-                    if (c.t < 0.35) { /* frozen beat */ }
-                    else if (c.t < 0.55) { const kk = (c.t - 0.35) / 0.2; S.pos.lerpVectors(c.from, end, kk * kk); burst(new THREE.Vector3(S.pos.x, 1.2, S.pos.z), `${(c.t * 900) % 255 | 0},200,255`, 2, 1); }
-                    else if (!c.hit) { c.hit = true; damageJack(CFG.counterDmg, 'blade'); S.slashFx = 0.35; S.shake = 0.3; sfx('slash'); }
-                    else if (c.t > 0.9) { S.counter = null; setTimeStop(false); S.iframes = Math.max(S.iframes, 0.5); }
+                    const freeze = TIMESTOP.counterStop, dash = TIMESTOP.counterDashTime + 0.06;
+                    if (!c.dir) {
+                        c.dir = new THREE.Vector3(J.x - c.from.x, 0, J.z - c.from.z).normalize();
+                        const through = new THREE.Vector3(J.x, 0, J.z).add(c.dir.clone().multiplyScalar(2.6));
+                        if (!walkable(through.x, through.z) || (S.mode === 'FIGHT' && !inArena(through.x, through.z))) through.set(J.x, 0, J.z).sub(c.dir.clone().multiplyScalar(1.6));
+                        c.to = through;
+                    }
+                    if (c.t >= freeze && !c.dashed) { c.dashed = true; playCounterDashSound(); counterText(); }
+                    if (c.t >= freeze && c.t < freeze + dash) {
+                        const kk = (c.t - freeze) / dash;
+                        S.pos.lerpVectors(c.from, c.to, kk * kk * (3 - 2 * kk));
+                        S.pos.y = 0;
+                        S.yaw = Math.atan2(-c.dir.x, -c.dir.z);
+                        spawnAfterimage(); spawnAfterimage();
+                        burst(new THREE.Vector3(S.pos.x, 1.2, S.pos.z), '165,243,252', 2, 1.5);
+                    }
+                    // four cuts in quick succession as he passes through
+                    const cutTimes = [0.02, 0.07, 0.12, 0.17].map(x => freeze + dash * 0.5 + x);
+                    cutTimes.forEach((ct, n) => {
+                        if (c.t >= ct && c.cuts === n) {
+                            c.cuts++;
+                            addCut([-0.6, 0.7, -0.15, 1.3][n]);
+                            sfx('slash'); S.shake = Math.max(S.shake, 0.2);
+                            burst(new THREE.Vector3(J.x, 1.6, J.z), n % 2 ? '255,255,255' : '165,243,252', 14, 7);
+                        }
+                    });
+                    if (c.cuts >= 4 && !c.hit && c.t > cutTimes[3] + 0.12) {
+                        c.hit = true;
+                        playCounterHitSound();
+                        damageJack(CFG.counterDmg, 'blade');
+                        J.stun = Math.max(J.stun, 1.2); J.attack = null;
+                        S.shake = 0.45; S.whiteFlash = 0.25;
+                        ring(new THREE.Vector3(J.x, 0, J.z), '165,243,252', 7, 0.5);
+                    }
+                    if (c.t > cutTimes[3] + 0.45) {
+                        S.counter = null;
+                        setTimeStop(false);
+                        S.iframes = Math.max(S.iframes, 0.5);           // half a second of safety after a counter
+                        S.yaw = Math.atan2(S.pos.x - J.x, S.pos.z - J.z);
+                    }
                 }
+                // flow state: leave afterimages while time is stopped
+                if (S.timeStopped && !S.counter && moving) { S.ghostT = (S.ghostT || 0) - dt; if (S.ghostT <= 0) { S.ghostT = 0.06; spawnAfterimage(); } }
+                updateGhosts(dt);
+                updateCuts(dt);
+                drawStopFx(dt);
+                if (S.whiteFlash > 0) { S.whiteFlash -= dt; document.getElementById('tFade').style.cssText = `background:#fff;opacity:${Math.max(0, S.whiteFlash * 3)};transition:none`; }
+                else if (S.whiteFlash !== undefined && S.whiteFlash <= 0 && !S.ended) { S.whiteFlash = undefined; document.getElementById('tFade').style.cssText = ''; }
 
                 // --- weapons ---
                 if (S.mode === 'FIGHT') {
@@ -10630,6 +10851,28 @@
                     const fp = new THREE.Vector3(S.pos.x, CFG.eye, S.pos.z);
                     cam.position.lerpVectors(fp, want, e);
                     cam.rotation.order = 'YXZ'; cam.rotation.set(S.pitch * (1 - e) + (pitch * 0.7 - 0.12) * e, S.yaw, 0);
+                    // counter: cut to a wide side-on shot of the dash through Jack
+                    if (S.counter && S.counter.dir) {
+                        const c = S.counter;
+                        if (!c.camPos) {
+                            const side = new THREE.Vector3(-c.dir.z, 0, c.dir.x);
+                            const mid = new THREE.Vector3(J.x, 0, J.z);
+                            let cp = mid.clone().add(side.clone().multiplyScalar(6.5));
+                            if (!inArena(cp.x, cp.z)) cp = mid.clone().sub(side.clone().multiplyScalar(6.5));
+                            if (!inArena(cp.x, cp.z)) cp = mid.clone().sub(c.dir.clone().multiplyScalar(7));
+                            cp.x = Math.max(ARENA.x0 + 0.6, Math.min(ARENA.x1 - 0.6, cp.x));
+                            cp.z = Math.max(ARENA.z0 + 0.6, Math.min(ARENA.z1 - 0.6, cp.z));
+                            c.camPos = cp.setY(1.9);
+                        }
+                        S.counterCam = 1;
+                        const push = Math.min(1, c.t / 1.2);
+                        cam.position.copy(c.camPos).lerp(new THREE.Vector3(J.x, 1.7, J.z), push * 0.18);
+                        cam.lookAt(new THREE.Vector3((J.x * 2 + S.pos.x) / 3, 1.45, (J.z * 2 + S.pos.z) / 3));
+                    } else if (S.counterCam > 0) {
+                        // ease back to the shoulder camera
+                        S.counterCam = Math.max(0, S.counterCam - dt * 2.5);
+                        if (!S.prevCam) S.prevCam = cam.position.clone();
+                    }
                     // during the intro, look at Jack
                     if (S.mode === 'INTRO') {
                         const look = new THREE.Vector3(J.x, 1.4, J.z);
@@ -10660,7 +10903,7 @@
                 jo.shadow.position.set(J.x, 0.03, J.z);
                 jo.shadow.scale.setScalar(1 / (1 + J.y * 0.25));
                 jo.spr.material.color.setRGB(1, J.flash > 0 ? 1 : 0.95, J.flash > 0 ? 1 : 0.95);
-                if (J.flash > 0) jo.spr.material.color.setRGB(3, 3, 3);
+                if (J.flash > 0) jo.spr.material.color.setRGB(1.8, 1.8, 2.2);
                 jo.glow.material.opacity = (S.mode === 'WIN' ? jo.glow.material.opacity : 0.55 + Math.sin(S.time * 3) * 0.15);
                 jo.light.intensity = (S.mode === 'WIN' ? Math.max(0, 1 - S.winT / 2) : 1) * (S.phase === 2 ? 6 : 4);
 
@@ -10677,10 +10920,10 @@
                 // --- rain ---
                 const sp2 = S.splash;
                 const P = S.rain.geometry.attributes.position.array, B = S.rainBase;
-                const wind = 1.2, fall = 15;
+                const wind = 1.2, fall = S.timeStopped ? 0 : 15;
                 for (let i = 0; i < B.length / 3; i++) {
                     let y = B[i * 3 + 1] - fall * dt;
-                    if (y < 0) { y += 16; if (Math.random() < 0.06) addSplash(); }
+                    if (y < 0) { y += 16; if (Math.random() < 0.06 && !S.timeStopped) addSplash(); }
                     B[i * 3 + 1] = y;
                     let x = B[i * 3] + wind * dt * 0.2;
                     x = ((x - cam.position.x + 18) % 36 + 36) % 36 - 18 + cam.position.x;
@@ -10710,6 +10953,12 @@
                 if (S.paused) return;
                 update(dt);
                 S.renderer.render(S.scene, S.camera);
+                renderFx();
+            }
+            function renderFx() {
+                if (!S.fxR) return;
+                if (S.fxScene.children.length) { S.fxR.render(S.fxScene, S.camera); S.fxDirty = true; }
+                else if (S.fxDirty) { S.fxR.clear(); S.fxDirty = false; }
             }
 
             function endScreen() {
@@ -10758,7 +11007,7 @@
                     pos: new THREE.Vector3(0, 0, 3), yaw: 0, pitch: 0.05, walkT: 0, lastStep: 0,
                     mode: 'WALK', time: 0, hp: CFG.maxHp, iframes: 0, phase: 1,
                     starCd: 0, parryCd: 0, bladeCd: 0, meleeCd: 0, parryActive: 0, stopT: 0,
-                    orbs: [], fx: [], rings: [], lightning: 0, nextBolt: 4, nextShell: 2, glow: 0, shake: 0,
+                    orbs: [], fx: [], rings: [], ghosts: [], cuts: [], lightning: 0, nextBolt: 4, nextShell: 2, glow: 0, shake: 0,
                     keys: {}, jack: { x: JACK_HOME.x, z: JACK_HOME.z, y: 0, hp: CFG.jackHp, flash: 0, rest: 1, stun: 0, wobble: 0 }
                 };
                 S.hemi = new THREE.HemisphereLight(0x8494a8, 0x3a2c1e, 0.85); scene.add(S.hemi);
@@ -10779,6 +11028,7 @@
                 S.slash = new THREE.Mesh(new THREE.PlaneGeometry(4, 1), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(slashC), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false }));
                 S.slash.visible = false; scene.add(S.slash);
                 S.hud = buildHud();
+                if (document.activeElement && document.activeElement.blur) document.activeElement.blur();   // Space must not re-press a button
                 hearts();
                 bindInput();
                 startAmbience();
@@ -10803,6 +11053,7 @@
                 S.renderer.dispose();
                 try { S.renderer.forceContextLoss(); } catch (e) {}
                 S.canvas.remove();
+                if (S.fxR) { S.fxScene.traverse(o => { if (o.material && o.material.dispose) o.material.dispose(); }); S.fxR.dispose(); try { S.fxR.forceContextLoss(); } catch (e) {} S.fxCanvas.remove(); }
                 if (S.hud) S.hud.remove();
                 const bar = document.getElementById('bossBar');
                 bar.classList.remove('top', 'shown', 'leaving'); bar.style.display = 'none';
@@ -10819,7 +11070,7 @@
                 await start(true);
             }
 
-            return { preload, start, retry, destroy, get state() { return S; }, CFG, _attacks: () => ATT, _damage: (d, k) => damageJack(d, k), _update: dt => update(dt), _render: () => S.renderer.render(S.scene, S.camera) };
+            return { preload, start, retry, destroy, get state() { return S; }, CFG, _attacks: () => ATT, _damage: (d, k) => damageJack(d, k), _update: dt => update(dt), _render: () => { S.renderer.render(S.scene, S.camera); renderFx(); } };
         })();
 
         // Player death in the trench: the same jumpscare, then the game-over screen
