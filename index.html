@@ -1604,7 +1604,7 @@
         };
         rawJackImg.src = "https://i.postimg.cc/yYGLfpLz/jackrooms.png";
 
-        const GAME_VERSION = 'V22';
+        const GAME_VERSION = 'V23';
         { const vt = document.getElementById('versionTag'); if (vt) vt.textContent = GAME_VERSION; }
         let globalTime = 0;
         let carpetPattern, noisePattern;
@@ -9535,6 +9535,201 @@
         // sky with lightning and distant shellfire. First person through the
         // trench; when you reach Jack the camera pulls out to third person and you
         // fight him with the relic you chose before Jacknality.
+        // =====================================================================
+        //  "NO MAN'S LAND"  -  the trench boss theme
+        // =====================================================================
+        // Terrifying and martial: D Phrygian, 92 BPM. Field snares and a great
+        // bass drum march under dissonant low strings and brass; an air-raid siren
+        // wails, a broken bugle calls, shells whistle in and land, machine guns
+        // rattle in the distance, and a choir of the dead moans in clusters.
+        //   INTRO   siren + bugle call + first shell (as Jack appears)
+        //   MARCH   8 bars: snare march, bass drum, low ostinato, brass stabs
+        //   ASSAULT 8 bars: pounding drums, tremolo string clusters, choir, shells
+        //   NIGHT   4 bars: everything drops to a heartbeat, the siren and gunfire
+        // Phase 2 jumps to ASSAULT and keeps the siren and extra drums going.
+        function createWarTheme(ac, destination) {
+            const K = createThemeKit(ac, destination, { verbSec: 4.5, verbDecay: 2.0, wet: 0.65 });
+            const BPM = 92, BEAT = 60 / BPM, BAR = BEAT * 4, S16 = BEAT / 4;
+            const mtof = K.mtof;
+            // D Phrygian-ish: i - bII - bVII - i, with a bvii dim colour
+            const PROG = [[38, [62, 65, 69]], [39, [63, 67, 70]], [36, [60, 64, 67]], [38, [62, 65, 68]]];
+
+            const noise = (t, dur, type, f, q, peak, decay, pan = 0, rev = 0.3) => {
+                const n = K.noise(t, dur + 0.05);
+                const fl = K.filt(type, f, q);
+                const g = K.ahr(t, peak, 0.001, 0, decay);
+                const p = K.pan(pan);
+                n.connect(fl); fl.connect(g); g.connect(p); K.send(p, rev);
+            };
+            // field snare: tight crack + rattle
+            function snare(t, v = 1) {
+                noise(t, 0.2, 'bandpass', 2100, 0.9, 0.5 * v, 0.16, 0, 0.35);
+                noise(t, 0.12, 'bandpass', 4200, 0.8, 0.16 * v, 0.1, 0, 0.2);
+                const o = K.osc('triangle', 190, t, t + 0.12); o.frequency.exponentialRampToValueAtTime(150, t + 0.08);
+                const g = K.ahr(t, 0.2 * v, 0.001, 0, 0.09); o.connect(g); K.send(g, 0.2);
+            }
+            function roll(t, dur, v0, v1) {
+                const n = Math.floor(dur / (S16 / 2));
+                for (let i = 0; i < n; i++) snare(t + i * S16 / 2 + (Math.random() - 0.5) * 0.004, v0 + (v1 - v0) * (i / n) * (0.85 + Math.random() * 0.15));
+            }
+            function bassDrum(t, v = 1) {
+                const o = K.osc('sine', 75, t, t + 1.2); o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.4);
+                const g = K.ahr(t, 0.28 * v, 0.004, 0, 1.0); o.connect(g); K.send(g, 0.35);
+                noise(t, 0.3, 'lowpass', 700, 0.7, 0.18 * v, 0.2, 0, 0.3);
+            }
+            // tremolo strings: a shuddering cluster
+            function trem(t, notes, dur, v = 1, cut = 1600) {
+                const lfo = K.osc('triangle', 13, t, t + dur + 0.6);
+                const lg = ac.createGain(); lg.gain.value = 0.5; lfo.connect(lg);
+                const amp = ac.createGain(); amp.gain.value = 0.5; lg.connect(amp.gain);
+                const lp = K.filt('lowpass', cut, 0.5);
+                const g = K.ahr(t, 0.03 * v, 0.4, dur - 0.4, 0.5);
+                notes.forEach(m => [-10, 10].forEach(c => { const s = K.osc('sawtooth', mtof(m), t, t + dur + 0.6); s.detune.value = c; s.connect(lp); }));
+                const smooth = K.filt('lowpass', 3000, 0.5);
+                lp.connect(amp); amp.connect(smooth); smooth.connect(g); K.send(g, 0.6);
+            }
+            // air-raid siren: slow rise and fall
+            function siren(t, dur, v = 1) {
+                const g = ac.createGain();
+                g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03 * v, t + 1.5);
+                g.gain.setValueAtTime(0.03 * v, t + dur - 1.5); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+                const lp = K.filt('lowpass', 1800, 0.7);
+                [0, 1].forEach(k => {
+                    const o = K.osc(k ? 'sine' : 'sawtooth', 300, t, t + dur + 0.1);
+                    const period = 4.2;
+                    for (let x = 0; x < dur; x += period) {
+                        o.frequency.setValueAtTime(260, t + x);
+                        o.frequency.exponentialRampToValueAtTime(780, t + x + period * 0.45);
+                        o.frequency.setValueAtTime(780, t + x + period * 0.6);
+                        o.frequency.exponentialRampToValueAtTime(260, t + x + period);
+                    }
+                    if (k) o.detune.value = 8;
+                    o.connect(lp);
+                });
+                const p = K.pan(-0.5); lp.connect(g); g.connect(p); K.send(p, 1.3);
+            }
+            // a shell whistles in from the distance and lands
+            function shell(t, v = 1) {
+                const o = K.osc('sine', 2200, t, t + 1.7);
+                o.frequency.setValueAtTime(2200, t); o.frequency.exponentialRampToValueAtTime(600, t + 1.5);
+                const vib = K.osc('sine', 9, t, t + 1.7); const vg = ac.createGain(); vg.gain.value = 18; vib.connect(vg); vg.connect(o.frequency);
+                const g = ac.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03 * v, t + 1.2); g.gain.linearRampToValueAtTime(0.0001, t + 1.55);
+                const p = K.pan((Math.random() - 0.5) * 1.2); o.connect(g); g.connect(p); K.send(p, 0.9);
+                K.boom(t + 1.55, 0.85 * v);
+                noise(t + 1.55, 1.2, 'lowpass', 1200, 0.6, 0.25 * v, 1.0, (Math.random() - 0.5), 0.9);
+            }
+            // distant machine gun
+            function gunfire(t, v = 1) {
+                const n = 6 + Math.floor(Math.random() * 10), pan = (Math.random() - 0.5) * 1.6, gap = 0.075 + Math.random() * 0.02;
+                for (let i = 0; i < n; i++) noise(t + i * gap, 0.06, 'bandpass', 900 + Math.random() * 300, 1.2, 0.09 * v, 0.05, pan, 1.1);
+            }
+            // a broken bugle call
+            function bugle(t, v = 1) {
+                const call = [[0, 62, 0.75], [0.75, 69, 0.25], [1, 69, 1], [2, 74, 0.75], [2.75, 72, 0.25], [3, 69, 2], [5.25, 63, 0.5], [5.75, 62, 2.5]];
+                K.lead(t, call.map(([b, m, l]) => [t + b * BEAT, m, l * BEAT * 0.95]), 0.9,
+                    { wave: 'sawtooth', cut: 2600, vib: 22, glide: 0.04, body: 1400, bodyGain: 7, rev: 1.3 });
+            }
+            function metal(t, v = 1) {
+                [[523, 1], [1170, 0.6], [1830, 0.4], [2690, 0.25]].forEach(([f, a]) => {
+                    const o = K.osc('sine', f * (0.98 + Math.random() * 0.04), t, t + 2.5);
+                    const g = K.ahr(t, 0.03 * v * a, 0.002, 0, 2.2); o.connect(g); K.send(g, 1.0);
+                });
+            }
+            function heart(t, v = 1) { K.taiko(t, 0.6 * v, 0.55); K.taiko(t + 0.17, 0.4 * v, 0.55); }
+
+            let section = 'IDLE', bar = 0, nextBar = 0, stopped = false, timer = null, phase2 = false, jump = false;
+            function playBar(t, b) {
+                const [root, tri] = PROG[b % 4];
+                const s = beat => t + beat * BEAT;
+                if (section === 'INTRO') {
+                    if (b === 0) {
+                        siren(t, BAR * 2.2, 1.1);
+                        bugle(s(0.5), 1);
+                        K.strings(t, 26, BAR * 2, 1.6, { attack: 1.2, cut: 500 });
+                        K.strings(t, 27, BAR * 2, 1.0, { attack: 1.5, cut: 500 });       // the semitone rub
+                        roll(s(2), BEAT * 2, 0.2, 0.9);
+                    } else {
+                        shell(s(0), 1);
+                        roll(s(0), BEAT * 3.5, 0.3, 1.1);
+                        K.swell(s(2), BEAT * 2, 1.2);
+                    }
+                    return;
+                }
+                if (section === 'MARCH') {
+                    // the march: bass drum on 1 and 3, snare pattern with flams, roll into every 4th bar
+                    bassDrum(s(0), 1.1); bassDrum(s(2), 0.9);
+                    [0.5, 1, 1.75, 2.5, 3, 3.25, 3.5].forEach((bt, i) => snare(s(bt), i % 3 === 0 ? 0.9 : 0.55));
+                    if (b % 4 === 3) roll(s(3), BEAT, 0.4, 1.0);
+                    K.strings(t, root - 12, BAR, 0.9, { attack: 0.05, cut: 700, rev: 0.4 });
+                    K.strings(t, root + 12, BAR, 0.9, { attack: 0.2, cut: 1800, rev: 0.6 });
+                    for (let i = 0; i < 8; i++) K.spicc(s(i / 2), [root + 12, root + 13, root + 12, root + 19][i % 4], 1.6, { cut: 1800, pan: i % 2 ? 0.3 : -0.3 });
+                    if (b % 2 === 0) { K.brass(s(0), root + 12, BEAT * 1.4, 2.0, { bright: 1600 }); K.brass(s(0), root + 13, BEAT * 1.4, 1.3, { bright: 1600 }); }
+                    if (b % 2 === 1) K.brass(s(2.5), root + 19, BEAT, 1.6, { bright: 1500 });
+                    if (Math.random() < 0.45) gunfire(s(Math.random() * 3), 0.8);
+                    if (b % 4 === 2) metal(s(3), 0.7);
+                    if (phase2) siren(t, BAR + 0.5, 0.7);
+                } else if (section === 'ASSAULT') {
+                    // the assault: pounding drums and screaming clusters
+                    for (let i = 0; i < 8; i++) K.taiko(s(i / 2), i % 2 ? 0.35 : 0.6, i % 4 === 0 ? 0.9 : 1.3);
+                    bassDrum(s(0), 1.2); if (phase2) bassDrum(s(2), 1);
+                    [1, 3].forEach(bt => snare(s(bt), 1.1));
+                    if (phase2) for (let i = 0; i < 16; i++) if (i % 4 !== 0) snare(s(i / 4), 0.25);
+                    trem(t, [tri[0], tri[0] + 1, tri[2]], BAR, 2.2, 1800 + (b % 4) * 400);
+                    trem(t, [root + 12, root + 24], BAR, 1.4, 1200);
+                    K.choir(t, [tri[0], tri[0] + 1, tri[1] + 12], BAR, 1.6, b % 2 ? 'oh' : 'ah', { attack: 0.3, release: 0.8 });
+                    K.sub(t, root - 12, BAR * 0.95, 0.5);
+                    if (b % 2 === 0) { K.brass(s(0), root + 12, BEAT * 3, 2.0, { bright: 1900 }); K.brass(s(0), root + 18, BEAT * 3, 1.4, { bright: 1900 }); }
+                    if (b % 4 === 1 || (phase2 && b % 2 === 1)) shell(s(1), 1);
+                    if (Math.random() < 0.7) gunfire(s(Math.random() * 3.5), 1);
+                    if (b % 8 === 7) { roll(s(2), BEAT * 2, 0.5, 1.3); K.swell(s(2), BEAT * 2, 1); }
+                    if (b % 8 === 0) K.crash(s(0), 0.8);
+                    if (phase2 && b % 4 === 0) siren(t, BAR * 4, 0.8);
+                } else if (section === 'NIGHT') {
+                    // the lull: a heartbeat, the dark, the guns far away
+                    heart(s(0), 1); heart(s(2), 0.8);
+                    K.strings(t, 26, BAR, 1.2, { attack: 0.8, cut: 400 });
+                    if (b === 0) { siren(t, BAR * 4, 0.9); K.choir(t, [50, 51, 57], BAR * 4, 0.7, 'oo', { attack: 2, release: 2 }); }
+                    if (Math.random() < 0.6) gunfire(s(Math.random() * 3), 0.6);
+                    if (b === 2) metal(s(0), 0.9);
+                    if (b === 3) { roll(s(0), BAR, 0.1, 1.2); K.riser(s(0), BAR, 0.8); }
+                }
+            }
+            const ORDER = { INTRO: ['MARCH', 2], MARCH: ['ASSAULT', 8], ASSAULT: ['NIGHT', 8], NIGHT: ['MARCH', 4] };
+            function tick() {
+                if (stopped) return;
+                while (nextBar < ac.currentTime + 0.5) {
+                    if (jump && section !== 'INTRO') { jump = false; section = 'ASSAULT'; bar = 0; }
+                    playBar(nextBar, bar);
+                    bar++;
+                    if (bar >= ORDER[section][1]) {
+                        bar = 0;
+                        section = ORDER[section][0];
+                        if (phase2 && section === 'NIGHT') section = 'MARCH';     // no rest in phase 2
+                    }
+                    nextBar += BAR;
+                }
+            }
+            return {
+                start() {
+                    section = 'INTRO'; bar = 0; nextBar = ac.currentTime + 0.05;
+                    K.out.gain.setValueAtTime(0.0001, ac.currentTime);
+                    K.out.gain.exponentialRampToValueAtTime(0.55, ac.currentTime + 0.6);
+                    timer = setInterval(tick, 60); tick();
+                },
+                setPhase2() { if (!phase2) { phase2 = true; jump = true; } },
+                _tick: () => tick(),
+                stop(fade = 2, finalHit = false) {
+                    if (stopped) return; stopped = true; clearInterval(timer);
+                    const n = ac.currentTime;
+                    if (finalHit) { K.boom(n, 1); metal(n, 1); }
+                    K.out.gain.cancelScheduledValues(n);
+                    K.out.gain.setValueAtTime(Math.max(0.0001, K.out.gain.value), n);
+                    K.out.gain.exponentialRampToValueAtTime(0.0001, n + Math.max(0.05, fade));
+                    setTimeout(() => { try { K.out.disconnect(); } catch (e) {} }, (fade + 6) * 1000);
+                }
+            };
+        }
+
         const Trench = (() => {
             const URLS = ['https://unpkg.com/three@0.160.0/build/three.module.js',
                           'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js'];
@@ -10165,24 +10360,8 @@
             // war drums for the fight (uses the finisher themes' orchestral kit)
             function startFightMusic() {
                 const ac = AudioSys.ctx; if (!ac || S.music) return;
-                const K = createThemeKit(ac, ac.destination, { verbSec: 2.8, verbDecay: 2.4, wet: 0.5 });
-                K.out.gain.setValueAtTime(0.0001, ac.currentTime); K.out.gain.exponentialRampToValueAtTime(0.42, ac.currentTime + 1.5);
-                const BEAT = 60 / 112, BAR = BEAT * 4;
-                const CH = [[40, [64, 67, 71]], [36, [64, 67, 72]], [38, [62, 66, 69]], [35, [63, 66, 71]]];
-                let next = ac.currentTime + 0.1, bar = 0;
-                const tick = () => {
-                    while (next < ac.currentTime + 0.5) {
-                        const [root, tri] = CH[bar % 4], s = b => next + b * BEAT;
-                        [0, 1.5, 2, 3, 3.5].forEach((b, i) => K.taiko(s(b), i === 0 ? 1 : 0.6, i % 2 ? 1.2 : 0.9));
-                        for (let i = 0; i < 8; i++) K.spicc(s(i / 2), [root + 12, root + 19, root + 24, root + 19][i % 4], 0.8, { pan: i % 2 ? 0.4 : -0.4, cut: 1800 });
-                        K.strings(next, root, BAR, 1.2, { attack: 0.1, cut: 800 });
-                        if (bar % 2 === 0) K.brass(next, root + 12, BEAT * 1.5, 1, { bright: 1500 });
-                        if (S.phase === 2) K.choir(next, tri, BAR, 0.8, 'ah', { attack: 0.3 });
-                        bar++; next += BAR;
-                    }
-                };
-                const timer = setInterval(tick, 80); tick();
-                S.music = { stop(f = 2) { clearInterval(timer); const n = ac.currentTime; K.out.gain.cancelScheduledValues(n); K.out.gain.setValueAtTime(Math.max(0.0001, K.out.gain.value), n); K.out.gain.exponentialRampToValueAtTime(0.0001, n + f); setTimeout(() => { try { K.out.disconnect(); } catch (e) {} }, (f + 4) * 1000); } };
+                S.music = createWarTheme(ac, ac.destination);
+                S.music.start();
             }
 
             // ---------------------------------------------------------------
@@ -10270,7 +10449,7 @@
                 sfx('hit');
                 burst(new THREE.Vector3(J.x, 1.4, J.z), kind === 'star' ? '253,224,71' : kind === 'blade' ? '165,243,252' : '255,120,120', 18, 6);
                 if (J.hp <= 0) startWin();
-                else if (J.hp <= CFG.jackHp / 2 && S.phase === 1) { S.phase = 2; sfx('roar'); jackShout(1); }
+                else if (J.hp <= CFG.jackHp / 2 && S.phase === 1) { S.phase = 2; sfx('roar'); jackShout(1); if (S.music) S.music.setPhase2(); }
             }
             function hurtPlayer() {
                 if (S.iframes > 0 || devGodMode || S.mode !== 'FIGHT') return;
@@ -10624,7 +10803,7 @@
                 setTimeStop(false);
                 sfx('roar');
                 document.getElementById('bossBar').classList.add('leaving');
-                if (S.music) S.music.stop(3);
+                if (S.music) S.music.stop(3, true);
                 S.lightning = 1; thunder(0);
             }
             function startDeath() {
@@ -10659,7 +10838,8 @@
                     if (S.timeStopped) sp *= TIMESTOP.flowSpeedMult * 1.25;
                     const sin = Math.sin(S.yaw), cos = Math.cos(S.yaw);
                     const dx = (mx * cos + mz * sin) * sp * dt, dz = (-mx * sin + mz * cos) * sp * dt;
-                    const arenaLock = S.mode === 'FIGHT';
+                    // once you're inside the arena you're locked in; from outside you can always walk in
+                    const arenaLock = S.mode === 'FIGHT' && inArena(S.pos.x, S.pos.z);
                     const ok = (x, z) => walkable(x, z) && (!arenaLock || inArena(x, z));
                     if (ok(S.pos.x + dx, S.pos.z + dz)) { S.pos.x += dx; S.pos.z += dz; }
                     else if (ok(S.pos.x + dx, S.pos.z)) S.pos.x += dx;
@@ -10736,6 +10916,12 @@
                 J.flash = Math.max(0, J.flash - dt);
                 if (S.mode === 'INTRO') {
                     S.introT += dt;
+                    // the camera pulls out while you step down into the crater
+                    if (!S.introFrom) S.introFrom = S.pos.clone();
+                    const ik = Math.min(1, S.introT / 2.0), ie = ik * ik * (3 - 2 * ik);
+                    S.pos.x = S.introFrom.x + (0 - S.introFrom.x) * ie;
+                    S.pos.z = S.introFrom.z + (Math.min(S.introFrom.z, -90.5) - S.introFrom.z) * ie;
+                    if (moving) S.walkT += dt * 6;
                     J.y = Math.abs(Math.sin(S.introT * 6)) * 0.4 * Math.max(0, 1 - S.introT / 2);
                     const fill = Math.min(1, S.introT / 1.8);
                     document.getElementById('bossFill').style.width = `${fill * 100}%`;
@@ -10835,7 +11021,8 @@
                     cam.rotation.set(0, 0, 0); cam.rotation.order = 'YXZ';
                     cam.rotation.y = S.yaw; cam.rotation.x = S.pitch;
                 } else {
-                    // third person: pull out behind the shoulder (blends over the intro)
+                    // third person: pull out behind the shoulder (blends over the intro). WASD / arrows move
+                    // relative to where the camera faces; the mouse turns the camera.
                     S.tp = Math.min(1, (S.tp || 0) + dt / 1.3);
                     const e = S.tp * S.tp * (3 - 2 * S.tp);
                     const pitch = Math.max(-0.6, Math.min(0.5, S.pitch));
@@ -10888,7 +11075,8 @@
                 const pm = S.pm;
                 pm.g.position.set(S.pos.x, 0.1, S.pos.z);
                 pm.g.rotation.y = S.yaw;
-                const sw = moving ? Math.sin(S.walkT) * 0.6 : 0;
+                const sw = (moving || (S.mode === 'INTRO' && S.introT < 2)) ? Math.sin(S.walkT) * 0.6 : 0;
+                if (S.mode === 'INTRO' && S.introT < 2) S.walkT += dt * 9;
                 pm.legL.rotation.x = sw; pm.legR.rotation.x = -sw; pm.armL.rotation.x = -sw * 0.7;
                 S.swing = Math.max(0, (S.swing || 0) - dt);
                 pm.armR.rotation.x = -0.9 - (S.swing > 0 ? Math.sin((0.25 - S.swing) / 0.25 * Math.PI) * 1.4 : 0);

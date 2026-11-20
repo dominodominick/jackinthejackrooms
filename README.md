@@ -11,6 +11,7 @@ Every release is also saved in `versions/` as `jack_in_the_jackrooms_V<number>.h
 
 | Version | Changes |
 |---|---|
+| V23 | Third-person movement fixed in the trench fight; new war theme "No Man's Land" for the Jack fight |
 | V22 | Arrow keys in the 3D trench; full N.O. Blade time stop and counter there (glass shatter, frozen rain, rainbow afterimages, four-cut counter); version number on the start screen |
 | V21 | The Party Room after Jacknality, Mystic Jack's warning, and the 3D WWI trench fight against Jack (three.js) |
 | V20 | "JACK!" gang chant in the Jacknality theme; new Star Cannon ("Stardust") and N.O. Blade ("Edge of Time") finisher themes |
