@@ -5297,33 +5297,34 @@
             // isn't available.
             const jackIn = ac.createGain();
             const jackHp = filt('highpass', 80);
-            const jackDrive = shaper(2.4, '4x');
+            const jackDrive = shaper(1.6, '4x');
             const jackLp = filt('lowpass', 4800, 0.6);
-            const jackOut = ac.createGain(); jackOut.gain.value = 0.55;
+            const jackOut = ac.createGain(); jackOut.gain.value = 0.75;
             jackIn.connect(jackHp); jackHp.connect(jackDrive); jackDrive.connect(jackLp); jackLp.connect(jackOut);
             send(jackOut, master, 0.4);
             const jackNoise = (() => { const b = ac.createBuffer(1, ac.sampleRate, ac.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; })();
+            // Aggressive gang chant (Tone.js), Web Audio fallback if Tone.js isn't loaded
             let jackVoices = null;
             function getJackVoices() {
-                const toneOk = typeof ToneLoader !== 'undefined' && ToneLoader.state === 'ready' && typeof makeToneJackVoice === 'function';
+                const toneOk = typeof ToneLoader !== 'undefined' && ToneLoader.state === 'ready' && typeof makeToneGangVoice === 'function';
                 if (jackVoices && (jackVoices.kind === 'tone' || !toneOk)) return jackVoices;
                 if (toneOk) {
                     try {
-                        const v = { kind: 'tone', hi: makeToneJackVoice(ac, jackIn), lo: makeToneJackVoice(ac, jackIn) };
-                        if (jackVoices) { jackVoices.hi.dispose(); jackVoices.lo.dispose(); }
+                        const v = makeToneGangVoice(ac, jackIn, 4);
+                        if (jackVoices) jackVoices.dispose();
                         return (jackVoices = v);
-                    } catch (e) { ToneLoader.state = 'failed'; }
+                    } catch (e) { ToneLoader.state = 'failed'; console.warn('Tone.js chant unavailable', e); }
                 }
-                if (!jackVoices && typeof makeWebAudioJackVoice === 'function') {
-                    jackVoices = { kind: 'webaudio', hi: makeWebAudioJackVoice(ac, jackIn, jackNoise), lo: makeWebAudioJackVoice(ac, jackIn, jackNoise) };
-                }
+                if (!jackVoices && typeof makeWebAudioGangVoice === 'function') jackVoices = makeWebAudioGangVoice(ac, jackIn, jackNoise);
                 return jackVoices;
             }
             function jackShout(t, midi = 45, v = 1, dur = 0.3) {
                 const J = getJackVoices();
-                if (!J) return;
-                J.hi.say(t, midiHz(midi), dur, v, 0.86);
-                J.lo.say(t + 0.006, midiHz(midi - 12), dur, v * 0.85, 0.74);
+                if (J) J.say(t, midiHz(midi + 12), dur, v);
+            }
+            // "JACK! JACK! JACK! JACK!" on the given 16th steps
+            function chant(t, step, steps, midi = 45, v = 1, dur = 0.26) {
+                if (steps.includes(step)) jackShout(t, midi, v, dur);
             }
 
             // ---------------- song ----------------
@@ -5375,6 +5376,7 @@
                     // A doom chord rings out as you approach
                     if (I > 0.72 && s0 && bar === 1) gtr(t, power(33), BAR * 2 - 0.1, 0.8, false);
                     if (I > 0.6 && bar === 3 && s0) cymbalSwell(t, BAR - 0.02, 0.5 + I * 0.5);
+                    if (I > 0.45 && bar >= 2) chant(t, step, [0, 8], 45, 0.25 + I * 0.35, 0.34);
                     return;
                 }
 
@@ -5452,7 +5454,8 @@
                     if (bar % 4 === 3 && step === 12) pickSlide(t, STEP * 3.5, 1);
                     if (bar === 7 && step >= 8) tom(t, 50 - (step - 8) * 2.2, 0.95);
                     notesAt(MEL.DOOM_LEAD[bar], step).forEach(([s, m, l]) => leadGtr(t, m, l * STEP, 1));
-                    if (s0 && (bar === 0 || bar >= 4)) jackShout(t, bar === 0 ? 45 : DESCENT[bar] + 12, 1, 0.34);
+                    if (s0 && bar === 0) jackShout(t, 45, 1, 0.36);
+                    if (bar >= 4 && bar < 7) chant(t, step, [0, 8], DESCENT[bar] + 12, 1, 0.3);
                     if (bar === 7 && (step === 12 || step === 14)) jackShout(t, 45, 0.9, 0.2);
                 } else if (isVerse) {
                     // Massacre: tremolo-picked death riff over blast beats
@@ -5474,8 +5477,8 @@
                     if (s0) sub(t, root, BAR, 1.05);
                     if ((bar === 1 || bar === 5) && (step === 8 || step === 11)) choirStab(t, chord, 0.7, false);
                     if (bar % 4 === 3 && step === 14) stutter(t, 2);
-                    if (bar % 4 === 3 && (step === 8 || step === 11)) jackShout(t, 45 + (step === 11 ? 3 : 0), 0.95, 0.22);
-                    if (extra && bar % 4 === 1 && step === 12) jackShout(t, 45, 0.85, 0.26);
+                    if (bar % 4 === 3) chant(t, step, [0, 4, 8, 12], 45, 0.95, 0.24);
+                    if (extra && bar % 4 === 1) chant(t, step, [4, 12], 45, 0.85, 0.24);
                     if (bar === 7 && step === 12) squeal(t, 93, 0.9);
                     if (bar === 7 && step === 8) tomFill(t, 8, 0.95);
                 } else if (section === 'PRE') {
@@ -5489,6 +5492,7 @@
                         if (s0) { china(t, 0.8); sub(t, root, BAR, 1.05); }
                         if (step % 4 === 2) hat(t, 0.6, true);
                     }
+                    if (bar === 2) chant(t, step, [0, 8], 45, 0.85, 0.3);
                     if (bar === 3 && (step === 0 || step === 4 || step === 8)) jackShout(t, 45 + step / 4 * 2, 0.9 + step / 40, 0.26);
                     if (bar === 3 && step === 10) stutter(t, 2);
                     if (bar === 3 && step === 12) { pickSlide(t, STEP * 3.6, 1.1); cymbalSwell(t - STEP * 8, STEP * 12, 0.9); }
@@ -5509,8 +5513,9 @@
                         sweep.forEach((m, i) => leadGtr(t + i * STEP / 2, m, STEP * 0.55, 0.7));
                     }
                     if (bar % 4 === 3 && step === 14) stutter(t, 2);
-                    if (s0 && (bar % 4 === 0 || (extra && bar % 2 === 0))) jackShout(t, 45, 1, 0.32);
-                    if (bar === 7 && (step === 12 || step === 13)) jackShout(t, 48, 0.9, 0.12);
+                    if (s0 && bar % 4 === 0) jackShout(t, 45, 1, 0.32);
+                    if (bar % 2 === 1 || extra) chant(t, step, [4, 12], 45, 0.9, 0.24);
+                    if (bar === 7) chant(t, step, [13, 14, 15], 48, 0.95, 0.1);
                     if (bar === 7 && step === 8) tomFill(t, 8, 1);
                     // The anthem: choir sings the melody, the lead doubles it in harmony
                     if (s0) choirLine(t, MEL.CHORUS[bar], 1.5, 'ah');
@@ -5598,7 +5603,7 @@
                     if (typeof setTimeout === 'function') {
                         setTimeout(() => {
                             try { limiter.disconnect(); } catch (e) {}
-                            if (jackVoices) { jackVoices.hi.dispose(); jackVoices.lo.dispose(); jackVoices = null; }
+                            if (jackVoices) { jackVoices.dispose(); jackVoices = null; }
                         }, (fade + 7) * 1000);
                     }
                 }
@@ -5765,6 +5770,99 @@
                     k.start(end + 0.03, Math.random() * 0.5); k.stop(end + 0.07);
                 },
                 dispose() { try { bus.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ---------- the aggressive gang chant "JACK!" (Tone.js) ----------
+        // Four shouting singers (one an octave down for weight), each with its own
+        // vocal-tract size, pitch, timing and a growl (rough amplitude wobble), all
+        // through warm Tone.js drive, a darkening filter and a compressor.
+        function toneUse(ac) {
+            const T = window.Tone;
+            let cur = null;
+            try { cur = T.getContext(); } catch (e) {}
+            if (!cur || cur.rawContext !== ac) T.setContext(ac);
+            return T;
+        }
+        function makeToneGangVoice(ac, out, n = 4) {
+            const T = toneUse(ac);
+            const all = [];
+            const mk = node => { all.push(node); return node; };
+            const drive = mk(new T.Distortion({ distortion: 0.22, oversample: '4x' }));
+            const hp = mk(new T.Filter({ type: 'highpass', frequency: 100, Q: 0.5 }));
+            const lp = mk(new T.Filter({ type: 'lowpass', frequency: 3400, Q: 0.5 }));
+            const comp = mk(new T.Compressor({ threshold: -20, ratio: 4, attack: 0.004, release: 0.12 }));
+            const outG = mk(new T.Gain(1.5));
+            drive.chain(hp, lp, comp, outG);
+            outG.connect(out);
+            const noise = mk(new T.Noise('pink').start());
+            const singers = [];
+            for (let i = 0; i < n; i++) {
+                const shape = 0.9 + i * 0.065;
+                const oct = i === n - 1 ? 0.5 : 1;
+                const osc = mk(new T.Oscillator({ type: 'sawtooth', frequency: 160 }).start());
+                const growl = mk(new T.LFO({ frequency: 58 + i * 11, min: 0.78, max: 1, type: 'sine' }).start());
+                const growlG = mk(new T.Gain(1));
+                growl.connect(growlG.gain);
+                const forms = [[750, 5, 1], [1300, 7, 0.7], [2500, 9, 0.35]].map(([fr, q, g]) => {
+                    const fl = mk(new T.Filter({ type: 'bandpass', frequency: fr * shape, Q: q }));
+                    const gg = mk(new T.Gain(g));
+                    osc.connect(fl); fl.connect(gg); gg.connect(growlG);
+                    return fl;
+                });
+                const env = mk(new T.AmplitudeEnvelope({ attack: 0.008, decay: 0.06, sustain: 0.85, release: 0.07 }));
+                const vg = mk(new T.Gain(2.6 / Math.sqrt(n)));
+                growlG.connect(env); env.connect(vg); vg.connect(drive);
+                const jf = mk(new T.Filter({ type: 'bandpass', frequency: 2700 * shape, Q: 1.3 }));
+                const jEnv = mk(new T.AmplitudeEnvelope({ attack: 0.004, decay: 0.05, sustain: 0, release: 0.02 }));
+                const kf = mk(new T.Filter({ type: 'bandpass', frequency: 1800 * shape, Q: 2.5 }));
+                const kEnv = mk(new T.AmplitudeEnvelope({ attack: 0.001, decay: 0.035, sustain: 0, release: 0.01 }));
+                const cg = mk(new T.Gain(1.4 / Math.sqrt(n)));
+                noise.connect(jf); jf.connect(jEnv); jEnv.connect(cg);
+                noise.connect(kf); kf.connect(kEnv); kEnv.connect(cg);
+                cg.connect(drive);
+                singers.push({ osc, forms, env, jEnv, kEnv, shape, oct, cents: (i - (n - 1) / 2) * 13, delay: i * 0.009 });
+            }
+            return {
+                kind: 'tone',
+                say(t, freq, dur = 0.3, vol = 1) {
+                    for (const s of singers) {
+                        const sh = s.shape;
+                        const t0 = t + s.delay + Math.random() * 0.006;
+                        const on = t0 + 0.03, vowel = Math.max(0.07, dur - 0.09), end = on + vowel;
+                        const f0 = freq * s.oct * Math.pow(2, s.cents / 1200);
+                        s.jEnv.triggerAttackRelease(0.04, t0, vol);
+                        // a shout: kicks in sharp, settles, then falls off
+                        s.osc.frequency.setValueAtTime(f0 * 1.12, on);
+                        s.osc.frequency.exponentialRampToValueAtTime(f0, on + 0.08);
+                        s.osc.frequency.exponentialRampToValueAtTime(f0 * 0.93, end);
+                        s.forms[0].frequency.setValueAtTime(350 * sh, on);
+                        s.forms[0].frequency.linearRampToValueAtTime(850 * sh, on + 0.06);
+                        s.forms[1].frequency.setValueAtTime(2100 * sh, on);
+                        s.forms[1].frequency.linearRampToValueAtTime(1700 * sh, on + 0.07);
+                        s.forms[1].frequency.linearRampToValueAtTime(1900 * sh, end);
+                        s.forms[2].frequency.setValueAtTime(2900 * sh, on);
+                        s.forms[2].frequency.linearRampToValueAtTime(2550 * sh, on + 0.07);
+                        s.env.triggerAttackRelease(vowel, on, vol);
+                        s.kEnv.triggerAttackRelease(0.03, end + 0.025, vol * 0.9);
+                    }
+                },
+                dispose() {
+                    all.forEach(nd => { try { if (nd.stop) nd.stop(); nd.dispose(); } catch (e) {} });
+                }
+            };
+        }
+        // Same chant from plain Web Audio voices, if Tone.js isn't available
+        function makeWebAudioGangVoice(ac, out, noiseBuf) {
+            const vs = [makeWebAudioJackVoice(ac, out, noiseBuf), makeWebAudioJackVoice(ac, out, noiseBuf), makeWebAudioJackVoice(ac, out, noiseBuf)];
+            return {
+                kind: 'webaudio',
+                say(t, freq, dur = 0.3, vol = 1) {
+                    vs[0].say(t, freq, dur, vol * 0.8, 0.88);
+                    vs[1].say(t + 0.012, freq * 1.008, dur, vol * 0.7, 0.97);
+                    vs[2].say(t + 0.006, freq * 0.5, dur, vol * 0.75, 0.78);
+                },
+                dispose() { vs.forEach(v => v.dispose()); }
             };
         }
 
@@ -6338,14 +6436,505 @@
             };
         }
 
+        // =====================================================================
+        //  FINISHER THEMES
+        // =====================================================================
+        // Speed Core (and a relic-less win) keep "The Last Light". The Star Cannon
+        // gets a spacey, smooth piece; the N.O. Blade gets the big one. Each theme
+        // listens for cues from its cinematic (cue('charge'), cue('flow'),
+        // cue('silence'), hit()) so the music lands exactly on the action.
+
+        // Shared orchestral / synth kit (smooth: no hard clipping, everything filtered)
+        function createThemeKit(ac, destination, opts = {}) {
+            const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+            const out = ac.createGain(); out.gain.value = 0.0001;
+            const glue = ac.createDynamicsCompressor();
+            glue.threshold.value = -18; glue.ratio.value = 3; glue.knee.value = 12; glue.attack.value = 0.012; glue.release.value = 0.3;
+            const warm = ac.createBiquadFilter(); warm.type = 'highshelf'; warm.frequency.value = 7000; warm.gain.value = -3;
+            const lim = ac.createWaveShaper();
+            { const n = 4096, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 4 - 2; c[i] = Math.tanh(x) * 0.95; } lim.curve = c; }
+            out.connect(glue); glue.connect(warm); warm.connect(lim); lim.connect(destination);
+            const mkIR = (sec, decay, bright) => {
+                const len = Math.floor(ac.sampleRate * sec), b = ac.createBuffer(2, len, ac.sampleRate);
+                for (let ch = 0; ch < 2; ch++) {
+                    const d = b.getChannelData(ch); let lp = 0;
+                    for (let i = 0; i < len; i++) {
+                        const k = i / len;
+                        lp += ((Math.random() * 2 - 1) - lp) * (bright - k * (bright - 0.08));   // darkens as it decays
+                        d[i] = lp * Math.pow(1 - k, decay) * (i < 300 ? i / 300 : 1);
+                    }
+                }
+                return b;
+            };
+            // A kit can borrow another kit's reverb/delay (convolvers are expensive)
+            let verbIn;
+            if (opts.share) verbIn = opts.share.verbIn;
+            else {
+                const verb = ac.createConvolver(); verb.buffer = mkIR(opts.verbSec || 3.6, opts.verbDecay || 2.4, 0.6);
+                const wet = ac.createGain(); wet.gain.value = opts.wet || 0.7;
+                verb.connect(wet); wet.connect(out);
+                verbIn = ac.createGain(); verbIn.connect(verb);
+            }
+            const dry = ac.createGain(); dry.connect(out);
+            // stereo ping-pong delay (used by the space theme)
+            const dL = ac.createDelay(2), dR = ac.createDelay(2);
+            const fb = ac.createGain(); fb.gain.value = opts.delayFb || 0.38;
+            const dlp = ac.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 3200;
+            const pl = ac.createStereoPanner ? ac.createStereoPanner() : ac.createGain();
+            const pr = ac.createStereoPanner ? ac.createStereoPanner() : ac.createGain();
+            if (pl.pan) { pl.pan.value = -0.8; pr.pan.value = 0.8; }
+            const delayIn = opts.share ? opts.share.delayIn : ac.createGain();
+            if (!opts.share) delayIn.connect(dL); dL.connect(dlp); dlp.connect(dR); dR.connect(fb); fb.connect(dL);
+            dL.connect(pl); dR.connect(pr); pl.connect(out); pr.connect(out); pl.connect(verbIn); pr.connect(verbIn);
+            const setDelay = (sec) => { dL.delayTime.value = sec; dR.delayTime.value = sec; };
+            setDelay(opts.delay || 0.4);
+            const send = (node, rev = 0.5, dly = 0) => {
+                node.connect(dry);
+                if (rev) { const g = ac.createGain(); g.gain.value = rev; node.connect(g); g.connect(verbIn); }
+                if (dly) { const g = ac.createGain(); g.gain.value = dly; node.connect(g); g.connect(delayIn); }
+            };
+            const pan = (p) => { if (ac.createStereoPanner) { const s = ac.createStereoPanner(); s.pan.value = p; return s; } return ac.createGain(); };
+            const noiseBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+            { const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+            const filt = (type, f, q = 0.7) => { const b = ac.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
+            const osc = (type, f, t, stop) => { const o = ac.createOscillator(); o.type = type; o.frequency.value = f; o.start(t); o.stop(stop); return o; };
+            const noise = (t, dur, loop = false) => { const s = ac.createBufferSource(); s.buffer = noiseBuf; s.loop = loop; s.start(t, Math.random()); s.stop(t + dur); return s; };
+            // gain envelope: attack, hold, release (exponential, click-free)
+            const ahr = (t, peak, a, hold, r) => {
+                const g = ac.createGain();
+                g.gain.setValueAtTime(0.0001, t);
+                g.gain.linearRampToValueAtTime(peak, t + a);
+                g.gain.setValueAtTime(peak, t + a + Math.max(0, hold));
+                g.gain.exponentialRampToValueAtTime(0.0001, t + a + Math.max(0, hold) + r);
+                return g;
+            };
+
+            const K = {
+                verbIn, delayIn,
+                ac, mtof, out, send, pan, filt, osc, noise, ahr, setDelay, noiseBuf,
+                // section strings: detuned saws, slow bow, vibrato, warm filter
+                strings(t, midi, dur, v = 1, o = {}) {
+                    const f = mtof(midi);
+                    const a = o.attack ?? 0.25, r = o.release ?? 0.6;
+                    const g = ahr(t, 0.036 * v, a, dur - a, r);
+                    const lp = filt('lowpass', o.cut || 2400, 0.5);
+                    const vib = osc('sine', 5 + Math.random() * 0.6, t, t + dur + r + 0.1);
+                    const vg = ac.createGain(); vg.gain.setValueAtTime(0, t); vg.gain.linearRampToValueAtTime(f * 0.005, t + 0.5);
+                    vib.connect(vg);
+                    [-8, 8].forEach(c => {
+                        const s = osc('sawtooth', f, t, t + dur + r + 0.1); s.detune.value = c + (Math.random() - 0.5) * 4;
+                        vg.connect(s.frequency); s.connect(lp);
+                    });
+                    const p = pan(o.pan || 0);
+                    lp.connect(g); g.connect(p); send(p, o.rev ?? 0.6);
+                },
+                // short spiccato string note for ostinatos
+                spicc(t, midi, v = 1, o = {}) {
+                    const f = mtof(midi);
+                    const g = ahr(t, 0.05 * v, 0.006, 0.03, 0.09);
+                    const lp = filt('lowpass', o.cut || 2600, 0.8);
+                    lp.frequency.setValueAtTime((o.cut || 2600) * 1.5, t); lp.frequency.exponentialRampToValueAtTime(o.cut || 2600, t + 0.06);
+                    [-6, 6].forEach(c => { const s = osc('sawtooth', f, t, t + 0.18); s.detune.value = c; s.connect(lp); });
+                    const p = pan(o.pan || 0);
+                    lp.connect(g); g.connect(p); send(p, o.rev ?? 0.35);
+                },
+                // brass: saw ensemble with a filter "blat" on the attack
+                brass(t, midi, dur, v = 1, o = {}) {
+                    const f = mtof(midi);
+                    const g = ahr(t, 0.022 * v, 0.06, dur - 0.06, 0.35);
+                    const lp = filt('lowpass', 400, 1.2);
+                    lp.frequency.setValueAtTime(400, t);
+                    lp.frequency.linearRampToValueAtTime((o.bright || 2200) * 1.3, t + 0.08);
+                    lp.frequency.exponentialRampToValueAtTime(o.bright || 2200, t + 0.4);
+                    [-7, 7].forEach(c => { const s = osc('sawtooth', f, t, t + dur + 0.4); s.detune.value = c; s.connect(lp); });
+                    const body = filt('peaking', 1100, 0.9); body.gain.value = 3;
+                    lp.connect(body); body.connect(g); send(g, o.rev ?? 0.55);
+                },
+                choir(t, notes, dur, v = 1, vowel = 'ah', o = {}) {
+                    const F = { ah: [[750, 1], [1180, 0.55], [2600, 0.22]], oo: [[330, 1], [850, 0.4], [2400, 0.12]], oh: [[480, 1], [880, 0.5], [2550, 0.18]] }[vowel];
+                    const a = o.attack ?? 0.6, r = o.release ?? 1.2;
+                    const g = ahr(t, 0.022 * v * Math.sqrt(notes.length) / notes.length * 2, a, dur - a, r);
+                    const src = ac.createGain();
+                    F.forEach(([ff, gg], i) => { const bp = filt('bandpass', ff, [6, 8, 10][i]); const gn = ac.createGain(); gn.gain.value = gg * 3.5; src.connect(bp); bp.connect(gn); gn.connect(g); });
+                    const vib = osc('sine', 4.8, t, t + dur + r + 0.1);
+                    const vg = ac.createGain(); vg.gain.value = 9; vib.connect(vg);
+                    notes.forEach(m => [-10, 10].forEach(c => { const s = osc('sawtooth', mtof(m), t, t + dur + r + 0.1); s.detune.value = c; vg.connect(s.detune); s.connect(src); }));
+                    send(g, o.rev ?? 1.0);
+                },
+                taiko(t, v = 1, pitch = 1) {
+                    const o1 = osc('sine', 110 * pitch, t, t + 1.2);
+                    o1.frequency.setValueAtTime(130 * pitch, t); o1.frequency.exponentialRampToValueAtTime(52 * pitch, t + 0.35);
+                    const g = ahr(t, 0.32 * v, 0.003, 0, 0.9);
+                    o1.connect(g);
+                    const n = noise(t, 0.4); const nl = filt('lowpass', 900); const ng = ahr(t, 0.3 * v, 0.002, 0, 0.18);
+                    n.connect(nl); nl.connect(ng); ng.connect(g);
+                    send(g, 0.4);
+                },
+                boom(t, v = 1) {
+                    const o1 = osc('sine', 90, t, t + 3.2); o1.frequency.exponentialRampToValueAtTime(30, t + 2.6);
+                    const g = ahr(t, 0.38 * v, 0.008, 0, 3); o1.connect(g); send(g, 0.3);
+                    const n = noise(t, 1.8); const nl = filt('lowpass', 1800); nl.frequency.exponentialRampToValueAtTime(150, t + 1.5);
+                    const ng = ahr(t, 0.35 * v, 0.004, 0, 1.6); n.connect(nl); nl.connect(ng); send(ng, 0.6);
+                },
+                crash(t, v = 1) {
+                    const n = noise(t, 3.2); const hp = filt('highpass', 3500); const bp = filt('lowpass', 9000);
+                    const g = ahr(t, 0.12 * v, 0.004, 0, 3); n.connect(hp); hp.connect(bp); bp.connect(g); send(g, 0.6);
+                },
+                swell(t, dur, v = 1) {   // reverse-cymbal style swell into a hit
+                    const n = noise(t, dur + 0.05, true); const hp = filt('highpass', 2500); const lp = filt('lowpass', 8000);
+                    const g = ac.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.14 * v, t + dur); g.gain.linearRampToValueAtTime(0.0001, t + dur + 0.04);
+                    n.connect(hp); hp.connect(lp); lp.connect(g); send(g, 0.8);
+                },
+                bell(t, midi, v = 1, o = {}) {
+                    const f = mtof(midi);
+                    const c = osc('sine', f, t, t + 3); const m = osc('sine', f * 3.5, t, t + 3);
+                    const mg = ahr(t, f * 1.6, 0.001, 0, 1.2); m.connect(mg); mg.connect(c.frequency);
+                    const g = ahr(t, 0.04 * v, 0.003, 0, o.decay || 2.4);
+                    const p = pan(o.pan || 0);
+                    c.connect(g); g.connect(p); send(p, o.rev ?? 0.7, o.dly || 0);
+                },
+                // warm analog pad (lowpassed detuned saws + a sine)
+                pad(t, notes, dur, v = 1, o = {}) {
+                    const a = o.attack ?? 1.2, r = o.release ?? 2.0;
+                    const g = ahr(t, 0.012 * v, a, dur - a, r);
+                    const lp = filt('lowpass', o.cut || 1400, 0.6);
+                    if (o.sweep) { lp.frequency.setValueAtTime(o.cut || 1400, t); lp.frequency.exponentialRampToValueAtTime(o.sweep, t + dur); }
+                    const L = pan(-0.6), R = pan(0.6);
+                    notes.forEach(m => {
+                        [[-12, L], [12, R], [0, null]].forEach(([c, p]) => {
+                            const s = osc(p ? 'sawtooth' : 'triangle', mtof(m), t, t + dur + r + 0.1);
+                            s.detune.value = c;
+                            s.connect(p || lp);
+                        });
+                    });
+                    L.connect(lp); R.connect(lp);
+                    lp.connect(g); send(g, o.rev ?? 0.8, o.dly || 0);
+                },
+                sub(t, midi, dur, v = 1) {
+                    const s = osc('sine', mtof(midi), t, t + dur + 0.5);
+                    const g = ahr(t, 0.13 * v, 0.03, dur - 0.03, 0.4); s.connect(g); send(g, 0);
+                },
+                // soft, round kick (no click)
+                softKick(t, v = 1) {
+                    const s = osc('sine', 120, t, t + 0.5); s.frequency.exponentialRampToValueAtTime(42, t + 0.18);
+                    const g = ahr(t, 0.3 * v, 0.004, 0, 0.35); s.connect(g); send(g, 0.1);
+                },
+                riser(t, dur, v = 1) {
+                    const n = noise(t, dur + 0.05, true); const bp = filt('bandpass', 300, 3); bp.frequency.exponentialRampToValueAtTime(6000, t + dur);
+                    const g = ac.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12 * v, t + dur); g.gain.linearRampToValueAtTime(0.0001, t + dur + 0.04);
+                    n.connect(bp); bp.connect(g); send(g, 0.7);
+                },
+                // a solo lead (violin-ish or synth) with legato glide between notes
+                lead(t, notes, v = 1, o = {}) {
+                    // notes: [[time, midi, dur]] absolute times
+                    if (!notes.length) return;
+                    const end = notes[notes.length - 1][0] + notes[notes.length - 1][2];
+                    const s1 = osc(o.wave || 'sawtooth', mtof(notes[0][1]), notes[0][0], end + 0.8);
+                    const s2 = osc(o.wave || 'sawtooth', mtof(notes[0][1]), notes[0][0], end + 0.8); s2.detune.value = 7;
+                    const vib = osc('sine', 5.4, t, end + 0.8); const vg = ac.createGain(); vg.gain.value = o.vib ?? 14; vib.connect(vg); vg.connect(s1.detune); vg.connect(s2.detune);
+                    const lp = filt('lowpass', o.cut || 3000, 0.6);
+                    const body = filt('peaking', o.body || 2600, 1.2); body.gain.value = o.bodyGain ?? 4;
+                    const g = ac.createGain(); g.gain.setValueAtTime(0.0001, t);
+                    notes.forEach(([nt, m, d]) => {
+                        [s1, s2].forEach(s => { s.frequency.setTargetAtTime(mtof(m), nt, o.glide ?? 0.025); });
+                        g.gain.setTargetAtTime(0.03 * v, nt, 0.03);
+                        g.gain.setTargetAtTime(0.021 * v, nt + 0.15, 0.2);
+                    });
+                    g.gain.setTargetAtTime(0.0001, end - 0.05, 0.25);
+                    s1.connect(lp); s2.connect(lp); lp.connect(body); body.connect(g);
+                    send(g, o.rev ?? 0.8, o.dly || 0);
+                }
+            };
+            return K;
+        }
+
+        // ---------------------------------------------------------------------
+        //  STAR CANNON: "Stardust"  -  spacey and smooth
+        // ---------------------------------------------------------------------
+        // D major / Lydian colours, 72 BPM, warm pads, a sparkling arpeggio through a
+        // ping-pong delay, a soft synth lead. On the blast it opens into the full
+        // version: wide pad, choir, round kick, sub, and the melody.
+        function createStarTheme(ac, destination) {
+            const K = createThemeKit(ac, destination, { verbSec: 5, verbDecay: 2.0, wet: 0.85, delay: 60 / 72 * 0.75, delayFb: 0.42 });
+            const BEAT = 60 / 72, BAR = BEAT * 4;
+            K.setDelay(BEAT * 0.75);
+            // Dmaj9 - Bm9 - Gmaj7#11 - A6sus
+            const CH = [
+                [38, [62, 66, 69, 73, 76]], [35, [62, 66, 69, 71, 73]],
+                [31, [62, 66, 67, 71, 73]], [33, [61, 64, 66, 69, 71]]
+            ];
+            const ARP = [[62, 69, 73, 76], [59, 66, 69, 73], [55, 62, 66, 73], [57, 64, 69, 71]];
+            const MEL = [
+                [[0, 78, 1.5], [1.5, 76, 0.5], [2, 73, 2]],
+                [[0, 74, 1], [1, 73, 1], [2, 71, 2]],
+                [[0, 73, 1.5], [1.5, 74, 0.5], [2, 76, 1], [3, 80, 1]],          // G#: the Lydian lift
+                [[0, 81, 3], [3, 76, 1]]
+            ];
+            let nextBar = 0, bar = 0, mode = 'drift', stopped = false, timer = null, hitPending = false, fullBars = 0;
+            function scheduleBar(t, b) {
+                const [root, chord] = CH[b % 4];
+                const s = beat => t + beat * BEAT;
+                if (mode !== 'full') {
+                    K.pad(t, chord.slice(0, 4), BAR, mode === 'charge' ? 1.1 : 0.8, { cut: mode === 'charge' ? 1200 : 900, sweep: mode === 'charge' ? 3200 : 1300, attack: 1.0 });
+                    const per = mode === 'charge' ? 8 : 4;
+                    for (let i = 0; i < 4 * per / 4 * (mode === 'charge' ? 2 : 1); i++) {
+                        const step = BEAT / (per / 4) / (mode === 'charge' ? 2 : 1);
+                        K.bell(t + i * step, ARP[b % 4][i % 4] + 12 + (mode === 'charge' && i >= 8 ? 12 : 0), mode === 'charge' ? 0.7 : 0.55, { dly: 0.45, pan: (i % 2 ? 0.4 : -0.4), decay: 1.8 });
+                    }
+                    K.sub(t, root, BAR, 0.35);
+                } else {
+                    // full
+                    fullBars++;
+                    K.pad(t, chord, BAR, 1.3, { cut: 2200, attack: 0.3, release: 1.6, dly: 0.12 });
+                    K.choir(t, [chord[0] + 12, chord[2] + 12, chord[3] + 12], BAR, 0.9, 'oo', { attack: 0.5 });
+                    K.sub(t, root, BAR * 0.95, 0.9);
+                    K.softKick(s(0), 0.9); K.softKick(s(2), 0.7); if (b % 2 === 1) K.softKick(s(3.5), 0.5);
+                    for (let i = 0; i < 16; i++) K.bell(s(i / 4), ARP[b % 4][i % 4] + 24, 0.32, { dly: 0.35, pan: Math.sin(i) * 0.7, decay: 1.2 });
+                    K.lead(t, MEL[b % 4].map(([bt, m, l]) => [s(bt), m, l * BEAT * 0.97]), 1, { wave: 'triangle', cut: 4200, vib: 10, glide: 0.06, body: 1800, bodyGain: 2, dly: 0.3 });
+                    if (b % 4 === 3) K.swell(s(2), BEAT * 2, 0.8);
+                }
+            }
+            function tick() {
+                if (stopped) return;
+                while (nextBar < ac.currentTime + 0.5) {
+                    if (hitPending) { hitPending = false; mode = 'full'; bar = 0; }
+                    scheduleBar(nextBar, bar);
+                    bar++;
+                    // on the victory screen: two full passes, one gentle, and around
+                    if (mode === 'full' && fullBars >= 8 && bar % 4 === 0) { mode = 'after'; fullBars = 0; }
+                    else if (mode === 'after' && bar % 4 === 0) mode = 'full';
+                    nextBar += BAR;
+                }
+            }
+            return {
+                start() {
+                    nextBar = ac.currentTime + 0.1;
+                    K.out.gain.setValueAtTime(0.0001, ac.currentTime);
+                    K.out.gain.exponentialRampToValueAtTime(0.5, ac.currentTime + 1.5);
+                    timer = setInterval(tick, 60); tick();
+                },
+                cue(name) {
+                    if (name === 'charge' && mode === 'drift') {
+                        mode = 'charge';
+                        K.riser(ac.currentTime, 2.4, 1);
+                        nextBar = ac.currentTime + 0.05; bar = 0;     // restart the bar on the cue
+                        tick();
+                    }
+                },
+                hit() {
+                    const t = ac.currentTime;
+                    K.boom(t, 0.8); K.crash(t, 1);
+                    K.choir(t, [62, 69, 74, 78], BAR * 1.5, 1.2, 'ah', { attack: 0.05, release: 2.5 });
+                    hitPending = true; nextBar = t + BEAT * 0.5; tick();
+                },
+                _tick: () => tick(),
+                stop(fade = 2) {
+                    if (stopped) return; stopped = true; clearInterval(timer);
+                    const now = ac.currentTime;
+                    K.out.gain.cancelScheduledValues(now);
+                    K.out.gain.setValueAtTime(Math.max(0.0001, K.out.gain.value), now);
+                    K.out.gain.exponentialRampToValueAtTime(0.0001, now + Math.max(0.05, fade));
+                    setTimeout(() => { try { K.out.disconnect(); } catch (e) {} }, (fade + 6) * 1000);
+                }
+            };
+        }
+
+        // ---------------------------------------------------------------------
+        //  N.O. BLADE: "Edge of Time"  -  climactic and powerful
+        // ---------------------------------------------------------------------
+        // Built around the cinematic:
+        //   standoff   low drone, a lone taiko, wind; the close-up gets a shimmering
+        //              high string harmonic and a three-note celesta motif
+        //   tension    heartbeat taiko, tremolo strings swelling, a reverse swell
+        //   flow       (cue) time stops: a downward whoosh, then a racing 16th-note
+        //              string ostinato with taiko and brass stabs, choir rising
+        //   silence    (cue) everything cuts; one high violin note hangs in the air
+        //   hit        the full orchestra: braam, taiko ensemble, choir, and the
+        //              heroic theme on brass + strings. Loops on the victory screen.
+        function createBladeTheme(ac, destination) {
+            const K = createThemeKit(ac, destination, { verbSec: 4.2, verbDecay: 2.2, wet: 0.75 });
+            const BPM = 84, BEAT = 60 / BPM, BAR = BEAT * 4;
+            // E minor
+            const CH = {
+                Em: [40, [64, 67, 71]], C: [36, [64, 67, 72]], G: [43, [62, 67, 71]], D: [38, [62, 66, 69]],
+                Am: [45, [64, 69, 72]], B: [35, [63, 66, 71]], Cmaj: [36, [60, 64, 67]]
+            };
+            const PROG = ['Em', 'C', 'G', 'D', 'Em', 'C', 'Am', 'B'];
+            const THEME = [
+                [[0, 71, 1.5], [1.5, 76, 0.5], [2, 78, 1], [3, 79, 1]],
+                [[0, 79, 2], [2, 78, 1], [3, 76, 1]],
+                [[0, 74, 2], [2, 71, 1], [3, 74, 1]],
+                [[0, 78, 3], [3, 81, 1]],
+                [[0, 83, 2], [2, 81, 1], [3, 79, 1]],
+                [[0, 79, 1.5], [1.5, 78, 0.5], [2, 76, 2]],
+                [[0, 72, 1], [1, 76, 1], [2, 81, 2]],
+                [[0, 78, 2], [2, 75, 2]]
+            ];
+            const bus = ac.createGain(); bus.gain.value = 1;          // the pre-hit music (cut on 'silence')
+            // route pre-hit instruments through 'bus' by temporarily swapping the kit's out
+            const kitOut = K.out;
+            let stopped = false, timer = null, mode = 'intro', nextT = 0, step = 0, flowStart = 0;
+            let bar = 0, nextBar = 0, epicBars = 0;
+            const t0 = ac.currentTime + 0.05;
+
+            // ---- pre-hit scheduling goes to a gated sub-mix ----
+            const pre = createThemeKit(ac, bus, { share: K });
+            pre.out.gain.value = 0.42;
+            bus.connect(kitOut);
+
+            function scheduleIntro() {
+                const t = t0;
+                // standoff: low drone + wind + a single distant taiko
+                pre.strings(t, 28, 8.5, 1.4, { attack: 2.5, release: 1.5, cut: 500 });
+                pre.strings(t, 40, 8.5, 1.0, { attack: 3.0, release: 1.5, cut: 700 });
+                pre.taiko(t + 0.05, 0.7, 0.8);
+                const w = pre.noise(t, 9, true); const wb = pre.filt('bandpass', 500, 0.8);
+                const wg = pre.ahr(t, 0.05, 1.5, 6, 1.5); w.connect(wb); wb.connect(wg); pre.send(wg, 0.8);
+                // close-up: shimmering harmonic + celesta motif E-B-E
+                pre.strings(t + 1.3, 83, 3.2, 0.8, { attack: 0.8, release: 1.2, cut: 5000, rev: 1.2 });
+                [[1.45, 76], [1.85, 83], [2.25, 88], [2.95, 86]].forEach(([dt, m]) => pre.bell(t + dt, m, 0.9, { rev: 1.1, decay: 3 }));
+                pre.choir(t + 1.3, [52, 59, 64], 3.2, 0.7, 'oo', { attack: 1.0 });
+                // tension: heartbeat taiko pairs + tremolo crescendo + reverse swell into the flow
+                [3.4, 3.95].forEach(dt => { pre.taiko(t + dt, 0.9, 0.7); pre.taiko(t + dt + 0.17, 0.6, 0.7); });
+                for (let k = 0; k < 20; k++) {
+                    const tt = t + 3.4 + k * 0.05;
+                    [64, 71, 76].forEach(m => pre.spicc(tt, m + (k > 12 ? 1 : 0), 0.25 + k / 20 * 0.7, { rev: 0.6, cut: 1800 + k * 120 }));
+                }
+                pre.swell(t + 3.4, 1.0, 1.1);
+            }
+
+            // racing ostinato during the flow state (accelerating with the slashes)
+            const OST = [64, 71, 67, 71, 64, 71, 67, 72, 64, 71, 67, 71, 66, 71, 67, 74];
+            function scheduleFlow() {
+                while (nextT < ac.currentTime + 0.25 && mode === 'flow') {
+                    const t = nextT, el = t - flowStart;
+                    const rate = Math.max(0.072, 0.11 - el * 0.011);     // speeds up over the flurry
+                    const m = OST[step % 16];
+                    pre.spicc(t, m, 0.9 + Math.min(0.6, el * 0.15), { pan: -0.35, cut: 2400 + el * 300 });
+                    pre.spicc(t, m - 12, 0.7, { pan: 0.35, cut: 1500 });
+                    if (step % 4 === 0) pre.taiko(t, 0.8 + Math.min(0.4, el * 0.1), 1);
+                    if (step % 8 === 6) pre.taiko(t, 0.55, 1.3);
+                    if (step % 16 === 0) {
+                        pre.brass(t, 52, rate * 4, 1.0, { bright: 1600 });
+                        pre.brass(t, 59, rate * 4, 0.8, { bright: 1600 });
+                        pre.choir(t, [64 + Math.min(7, Math.floor(el * 2)), 71 + Math.min(5, Math.floor(el * 1.5))], rate * 16, 0.6 + el * 0.15, 'ah', { attack: 0.2, release: 0.4 });
+                        pre.sub(t, 28, rate * 15, 0.8);
+                    }
+                    if (step % 16 === 8) pre.brass(t, 55 + (Math.floor(step / 16) % 2) * 2, rate * 3, 0.8, { bright: 1800 });
+                    nextT += rate; step++;
+                }
+            }
+
+            function epicBar(t, b) {
+                const name = PROG[b % 8], [root, tri] = CH[name];
+                const s = beat => t + beat * BEAT;
+                epicBars++;
+                // drums: taiko ensemble pattern
+                [0, 1.5, 2, 3, 3.5].forEach((bt, i) => K.taiko(s(bt), i === 0 ? 1.1 : 0.7, i % 2 ? 1.25 : 1));
+                if (b % 2 === 0) K.crash(s(0), 0.6);
+                // low strings + brass pads
+                K.strings(t, root - 12, BAR, 1.6, { attack: 0.08, cut: 900, rev: 0.4 });
+                K.strings(t, root, BAR, 1.3, { attack: 0.08, cut: 1200, rev: 0.4 });
+                tri.forEach(m => K.strings(t, m, BAR, 0.9, { attack: 0.15, cut: 2600, pan: (m % 3 - 1) * 0.4 }));
+                K.sub(t, root, BAR * 0.95, 0.9);
+                // driving 8th-note string ostinato underneath
+                for (let i = 0; i < 8; i++) K.spicc(s(i / 2), tri[[0, 1, 2, 1][i % 4]] - 12, 0.7, { pan: i % 2 ? 0.4 : -0.4 });
+                // choir on the chord
+                K.choir(t, tri.map(m => m), BAR, 0.95, b % 8 >= 4 ? 'ah' : 'oh', { attack: 0.2, release: 0.8 });
+                // the THEME: brass + violins in octaves
+                THEME[b % 8].forEach(([bt, m, l]) => {
+                    K.brass(s(bt), m - 12, l * BEAT * 0.96, 1.3, { bright: 2600 });
+                    if (b % 8 >= 4) K.brass(s(bt), m - 24, l * BEAT * 0.96, 0.8, { bright: 1400 });
+                });
+                K.lead(t, THEME[b % 8].map(([bt, m, l]) => [s(bt), m, l * BEAT * 0.98]), 1.2, { cut: 4200, vib: 16, rev: 0.9 });
+                if (b % 8 === 7) { K.swell(s(2), BEAT * 2, 1); for (let i = 0; i < 8; i++) K.taiko(s(2 + i / 4), 0.5 + i / 10, 1.2); }
+            }
+            function calmBar(t, b) {
+                const name = PROG[b % 8], [root, tri] = CH[name];
+                const s = beat => t + beat * BEAT;
+                K.strings(t, root, BAR, 1.0, { attack: 0.8, cut: 900 });
+                tri.forEach(m => K.strings(t, m, BAR, 0.6, { attack: 0.9, cut: 1800 }));
+                [0, 1, 2, 1, 0, 2, 1, 2].forEach((k, i) => K.bell(s(i / 2), tri[k] + 12, 0.45, { decay: 2 }));
+                if (b % 2 === 0) K.taiko(s(0), 0.4, 0.8);
+                K.lead(t, THEME[b % 8].map(([bt, m, l]) => [s(bt), m - 12, l * BEAT * 0.98]), 0.7, { cut: 2400, vib: 12 });
+            }
+
+            function tick() {
+                if (stopped) return;
+                if (mode === 'flow') scheduleFlow();
+                if (mode === 'epic' || mode === 'calm') {
+                    while (nextBar < ac.currentTime + 0.5) {
+                        if (mode === 'epic') epicBar(nextBar, bar); else calmBar(nextBar, bar);
+                        bar++;
+                        // two full statements, one quiet one, and around (victory screen)
+                        if (mode === 'epic' && epicBars >= 16 && bar % 8 === 0) { mode = 'calm'; epicBars = 0; }
+                        else if (mode === 'calm' && bar % 8 === 0) mode = 'epic';
+                        nextBar += BAR;
+                    }
+                }
+            }
+
+            return {
+                start() {
+                    kitOut.gain.setValueAtTime(0.0001, ac.currentTime);
+                    kitOut.gain.exponentialRampToValueAtTime(0.48, ac.currentTime + 0.8);
+                    scheduleIntro();
+                    timer = setInterval(tick, 40);
+                },
+                cue(name) {
+                    const t = ac.currentTime;
+                    if (name === 'flow' && mode === 'intro') {
+                        // time stops: a pitch-dropping whoosh, then the ostinato races
+                        const o = pre.osc('sawtooth', 880, t, t + 0.6); o.frequency.exponentialRampToValueAtTime(55, t + 0.5);
+                        const lp = pre.filt('lowpass', 2500); lp.frequency.exponentialRampToValueAtTime(200, t + 0.5);
+                        const g = pre.ahr(t, 0.05, 0.01, 0.1, 0.4); o.connect(lp); lp.connect(g); pre.send(g, 1.0);
+                        pre.boom(t, 0.5);
+                        mode = 'flow'; flowStart = t + 0.32; nextT = flowStart; step = 0;
+                        tick();
+                    } else if (name === 'silence' && mode === 'flow') {
+                        // everything cuts, a single high note hangs
+                        mode = 'silence';
+                        bus.gain.cancelScheduledValues(t);
+                        bus.gain.setValueAtTime(1, t); bus.gain.linearRampToValueAtTime(0.0001, t + 0.08);
+                        K.strings(t + 0.05, 88, 1.2, 0.7, { attack: 0.3, release: 0.4, cut: 6000, rev: 1.3 });
+                        K.sub(t + 0.05, 28, 0.9, 0.35);
+                        K.swell(t + 0.3, 0.5, 0.7);
+                    }
+                },
+                hit() {
+                    const t = ac.currentTime;
+                    if (mode === 'intro' || mode === 'flow') { bus.gain.setValueAtTime(1, t); bus.gain.linearRampToValueAtTime(0.0001, t + 0.05); }
+                    // the strike: braam + boom + full choir, then the theme
+                    K.boom(t, 1); K.crash(t, 1.2);
+                    [28, 40, 47, 52].forEach(m => K.brass(t, m, 2.6, 1.2, { bright: 1200 }));
+                    K.choir(t, [52, 59, 64, 71, 76], BAR * 0.9, 1.4, 'ah', { attack: 0.03, release: 1.5 });
+                    for (let i = 0; i < 6; i++) K.taiko(t + i * 0.06, 1 - i * 0.1, 0.9 + i * 0.05);
+                    mode = 'epic'; bar = 0; epicBars = 0; nextBar = t + BEAT * 0.75;
+                    tick();
+                },
+                _tick: () => tick(),
+                stop(fade = 2) {
+                    if (stopped) return; stopped = true; clearInterval(timer);
+                    const now = ac.currentTime;
+                    kitOut.gain.cancelScheduledValues(now);
+                    kitOut.gain.setValueAtTime(Math.max(0.0001, kitOut.gain.value), now);
+                    kitOut.gain.exponentialRampToValueAtTime(0.0001, now + Math.max(0.05, fade));
+                    setTimeout(() => { try { kitOut.disconnect(); bus.disconnect(); } catch (e) {} }, (fade + 6) * 1000);
+                }
+            };
+        }
+
+        // Which theme plays for which ending
         const DefeatTheme = {
             inst: null,
-            start(powerful = false) {
+            start(powerful = false, kind = null) {
                 const ac = AudioSys.ctx; if (!ac) return;
                 if (this.inst) this.inst.stop(0.3);
-                this.inst = createDefeatTheme(ac, ac.destination);
+                const make = kind === 'cannon' ? createStarTheme : kind === 'blade' ? createBladeTheme : createDefeatTheme;
+                this.inst = make(ac, ac.destination);
                 this.inst.start(powerful);
             },
+            cue(name) { if (this.inst && this.inst.cue) this.inst.cue(name); },
             hit() { if (this.inst) this.inst.hit(); },
             stop(fade = 2) { if (this.inst) { this.inst.stop(fade); this.inst = null; } }
         };
@@ -6954,7 +7543,7 @@
             document.getElementById('playerHearts').style.display = 'none';
             document.body.style.cursor = 'none';
             BossMusic.stop(0.4);
-            DefeatTheme.start(false);
+            DefeatTheme.start(false, kind);
 
             const cx = (roomLeft() + roomRight()) / 2;
             cine = {
@@ -7079,7 +7668,7 @@
                 const k = easeIn(seg(t, 1.6, 4.0));
                 B.y = lerp(165, 400, k); B.s = 1.15 + 0.25 * k;
                 B.jx = (Math.random() - 0.5) * 6; B.jy = (Math.random() - 0.5) * 6;
-                if (once('chargeSnd')) { sfx.charge(2.4); playBossRumble(2.4); }
+                if (once('chargeSnd')) { sfx.charge(2.4); playBossRumble(2.4); DefeatTheme.cue('charge'); }
                 C.charge = easeOut(seg(t, 1.7, 3.95));
                 const tip = cannonTip();
                 const n = Math.random() < dt * 70 ? 1 : 0;
@@ -7161,6 +7750,7 @@
             } else if (t < 8.15) {
                 // FLOW STATE: time stops, he's frozen, the hero becomes a storm of slashes
                 if (once('flow')) {
+                    DefeatTheme.cue('flow');
                     playTimeStopSound();
                     C.flash = 0.7; C.flashColor = '186, 230, 253';
                     C.flowRing = 0;
@@ -7219,7 +7809,7 @@
                 H.x = cx; H.y = 560;
                 const sheath = seg(t, 8.3, 8.75);
                 H.ang = lerp(-Math.PI / 2 + Math.PI, Math.PI / 2 + 0.9, easeIO(sheath));
-                if (once('land')) { C.shake = 6; burst(H.x, H.y + 8, 16, '165, 243, 252', 80, 260, { ang: Math.PI, spread: 3, part: { grav: 300 } }); }
+                if (once('land')) { DefeatTheme.cue('silence'); C.shake = 6; burst(H.x, H.y + 8, 16, '165, 243, 252', 80, 260, { ang: Math.PI, spread: 3, part: { grav: 300 } }); }
                 const k = easeIO(seg(t, 8.15, 8.9));
                 C.cam.x = cx; C.cam.y = lerp(B.y + 20, 420, k); C.cam.z = lerp(2.2, 1.55, k); C.cam.rot = lerp(0.04, 0, k);
                 if (t > 8.75 && once('click')) sfx.click();
